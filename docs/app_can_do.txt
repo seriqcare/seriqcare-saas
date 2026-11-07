@@ -1,0 +1,208 @@
+What Your App Can Do
+1. Collect and Process EVV Visit Data
+Your app can fully manage the EVV workflow on behalf of caregivers and agencies. This includes:
+
+Capturing clock‑in and clock‑out times
+
+Recording GPS location (if required by the state)
+
+Logging tasks performed during the visit
+
+Identifying the caregiver and client
+
+Validating service codes before submission
+
+Storing visit history and audit trails
+
+This forms the core of your EVV system and ensures that all required data elements are captured accurately.
+
+2. Submit Visits to HHAeXchange via the Alternate EVV API
+Your app can integrate directly with HHAeXchange using the official Alternate EVV API. This allows you to:
+
+Send completed visits in real time
+
+Receive immediate accept/reject responses
+
+Store HHAX validation results
+
+Resubmit corrected visits
+
+Track visit status across the entire lifecycle
+
+This ensures agencies remain compliant with state EVV requirements.
+
+3. Track Visit Status and Provide Operational Visibility
+Your app can give agencies a clear view of visit outcomes, including:
+
+Pending visits
+
+Successfully submitted visits
+
+Accepted visits
+
+Rejected visits with error reasons
+
+Corrected and resubmitted visits
+
+This is something agencies struggle to see clearly in HHAeXchange, so your app adds real value.
+
+4. Process V5 Billing Files Uploaded by the Agency
+Your app can process V5 files if the agency downloads them from HHAeXchange and uploads them to your system. With these files, your app can:
+
+Billing Exceptions V5
+Show why visits failed billing
+
+Link exceptions to the original EVV visit
+
+Provide context (GPS, tasks, caregiver)
+
+Suggest corrections
+
+Processed Visits V5
+Display which visits were billed
+
+Show denied or adjusted visits
+
+Track billed units vs paid units
+
+Claim Response V5
+Show payer acceptance or denial
+
+Display denial reason codes
+
+Track claim status
+
+Remittance/Payment V5
+Show payment amounts
+
+Display check/EFT numbers
+
+Track paid vs unpaid visits
+
+This transforms your app into a billing reconciliation dashboard, something agencies do not get from HHAX.
+
+5. Provide Analytics and Summaries
+Using your EVV data + V5 billing data, your app can generate:
+
+Client billing summaries
+
+Caregiver hours and visit summaries
+
+Service code utilization
+
+Authorization usage (if provided by agency)
+
+Billing vs payment comparisons
+
+This gives agencies insights they cannot easily get from HHAeXchange.
+
+What Your App Cannot Do
+1. Your App Cannot Access HHAeXchange Billing Data Directly
+HHAeXchange does not give Alternate EVV vendors:
+
+SFTP access
+
+Billing files
+
+Claim files
+
+Remittance files
+
+Authorization feeds
+
+Client or caregiver lists
+
+Only the agency receives these.
+
+Your app can only process V5 files after the agency downloads them and uploads them to your system.
+
+2. Your App Cannot Replace HHAeXchange Billing
+HHAeXchange remains the official billing system. Your app cannot:
+
+Submit claims to payers
+
+Generate 837 claim files
+
+Replace HHAX’s billing engine
+
+Modify authorizations
+
+Change payer configurations
+
+Your app supports billing, but does not perform billing.
+
+3. Your App Cannot Create or Modify Data Inside HHAeXchange
+Your app cannot:
+
+Create clients
+
+Create caregivers
+
+Create service codes
+
+Create authorizations
+
+Update agency data in HHAX
+
+Only the agency can configure these inside HHAeXchange.
+
+Your app must rely on the agency to provide the correct identifiers.
+
+4. Your App Cannot Automatically Retrieve V5 Files
+Because HHAX does not allow EVV vendors to access SFTP:
+
+Your app cannot download V5 files
+
+Your app cannot poll HHAX for billing data
+
+Your app cannot sync billing data automatically
+
+The agency must manually upload the files to your system.
+
+5. Your App Cannot Guarantee Billing Success
+Your app can help agencies:
+
+Identify issues
+
+Correct visit data
+
+Understand billing outcomes
+
+But it cannot:
+
+Control payer decisions
+
+Override HHAX billing rules
+
+Fix authorization issues inside HHAX
+
+Prevent denials caused by payer policies
+
+Billing success ultimately depends on the agency’s HHAX setup and payer rules.
+
+Summary
+Your app is a powerful EVV and billing‑support platform, but it operates alongside HHAeXchange, not inside it.
+
+Your app can do:
+Collect EVV data
+
+Submit visits via API
+
+Track visit status
+
+Process V5 billing files
+
+Provide billing reconciliation
+
+Offer analytics and summaries
+
+Your app cannot do:
+Access HHAX billing data directly
+
+Replace HHAX billing
+
+Create or modify HHAX records
+
+Automatically retrieve V5 files
+
+Guarantee payer billing outcomes

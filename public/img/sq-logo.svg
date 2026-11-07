@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 90" role="img" aria-label="SeriqCare SQ logo">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@800&amp;display=swap');
+    </style>
+
+    <!--
+      Interwoven effect:
+        • Top half  → Q rendered in front of S
+        • Bottom half → S rendered in front of Q
+      Achieved by:
+        1. Paint Q at the back (full)
+        2. Paint S in the middle (S over Q everywhere)
+        3. Re-paint the top half of Q on top (Q over S in upper region)
+    -->
+    <clipPath id="sq-top-half">
+      <rect x="0" y="0" width="96" height="46"/>
+    </clipPath>
+  </defs>
+
+  <!-- ① Q — base layer (fully behind S initially) -->
+  <text
+    x="28" y="78"
+    font-family="Inter, 'Helvetica Neue', Arial, sans-serif"
+    font-weight="800"
+    font-size="78"
+    fill="#2567a4"
+  >Q</text>
+
+  <!-- ② S — middle layer (S wins over Q in the LOWER half) -->
+  <text
+    x="4" y="78"
+    font-family="Inter, 'Helvetica Neue', Arial, sans-serif"
+    font-weight="800"
+    font-size="78"
+    fill="#021425"
+  >S</text>
+
+  <!-- ③ Q top half — front layer (Q wins over S in the UPPER half) -->
+  <g clip-path="url(#sq-top-half)">
+    <text
+      x="28" y="78"
+      font-family="Inter, 'Helvetica Neue', Arial, sans-serif"
+      font-weight="800"
+      font-size="78"
+      fill="#2567a4"
+    >Q</text>
+  </g>
+</svg>

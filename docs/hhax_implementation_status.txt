@@ -1,0 +1,389 @@
+================================================================================
+  HHAEXCHANGE INTEGRATION — IMPLEMENTATION STATUS
+  SeriqCare App Release
+  Last updated: 2026-03-22
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The HHAeXchange aggregator handles PA Medicaid / PDA visits (non-ODP waivers).
+ODP-waiver visits route to Sandata. Routing is determined at the service code
+level via care.service_codes.waiver_id → care.waivers.waiver_code.
+
+Simulator workspace:
+  c:\Users\olada\OneDrive\Documents\Care\HHAeXchange\
+
+Simulator runs on:
+  http://localhost:3000
+
+SeriqCare backend runs on:
+  http://localhost:8000
+
+SeriqCare frontend runs on:
+  http://localhost:3001
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  COMPLETED — BACKEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────────────────────
+  P1 — services/hhax.py  (new file)
+────────────────────────────────────────────────────────────────────────────
+
+File: backend/services/hhax.py
+
+Functions implemented:
+
+  _get_bearer_token()
+    OAuth 2.0 client_credentials flow against HHAX_BASE_URL/identity/connect/token.
+    Token cached in memory; refreshed 60 s before expiry.
+
+  build_visit_payload(row)
+    Builds HHAx PA EVV field model payload:
+      agencyTaxId   → ag.agency_tax_id  (fallback: HHAX_AGENCY_TAX_ID env var)
+      caregiverCode → e.hhax_employee_id (fallback: e.employee_code)
+      medicaidNumber → c.medicaid_id
+      procedureCode → sc.hcpcs_code
+      payerId       → c.hhax_payer_id   (fallback: HHAX_DEFAULT_PAYER_ID env var)
+      scheduleDate  → v.service_date
+      scheduleStartTime / scheduleEndTime → call_in/out_datetime
+      clockInDatetime / clockOutDatetime  → call_in/out_datetime
+      GPS coords    → call_in/out_latitude/longitude
+      externalEvvmsid → ~SERIQCARE-{visit_id}
+
+  post_to_hhax(payload, visit_id)
+    Returns (status, response_code, response_message, hhax_visit_id).
+    Simulate mode: returns Accepted + generated VIS-XXXXXXXXX / HHAX-XXXXXXXXX.
+    Live mode: POSTs to HHAX_BASE_URL/api/evv/visits; parses 201 response.
+
+  post_claim_to_hhax(claim_number, claim_amount, visit_count, ...)
+    Returns (status, response_code, response_message, hhax_claim_id).
+    Simulate mode: returns Accepted + generated CLM-XXXXXXXXX.
+    Live mode: POSTs to HHAX_BASE_URL/api/claims/upload.
+    Claim number format: PA-XXXXXXX (generated from claim ID if not already set).
+
+  register_caregiver(row)
+    Returns (status, message).
+    Simulate mode: returns Simulated immediately.
+    Live mode: POSTs to HHAX_BASE_URL/api/caregivers with agencyTaxId,
+    caregiverCode, firstName, lastName, caregiverType, optional npi.
+    Status values: Registered | AlreadyRegistered | Simulated | Failed | Error.
+
+  is_live()
+    Returns True when HHAX_MODE=live.
+
+
+────────────────────────────────────────────────────────────────────────────
+  P2 — Aggregator submission routing
+────────────────────────────────────────────────────────────────────────────
+
+File: backend/routers/aggregator.py
+
+Changes:
+
+  _update_hhax_status(db, visit_id, new_status, now_utc, hhax_visit_id)
+    New helper. Updates hhax_status + hhax_last_at + hhax_visit_id on
+    care.visit_integration_status. Uses COALESCE so a failed retry does not
+    overwrite a prior good hhax_visit_id.
+
+  _do_submit(visit_id, db, aggregator='sandata')
+    Now accepts aggregator param ('sandata' | 'hhax').
+    Gates on the correct status column (sandata_status or hhax_status).
+    Routes payload build + HTTP call + status update per aggregator.
+    HHAx path stores returned hhax_visit_id.
+
+  GET /api/aggregator/mode
+    Now returns {"sandata": "simulate|live", "hhax": "simulate|live"}.
+    Previously returned {"mode": "simulate|live"} (Sandata only).
+
+  POST /api/aggregator/submit/{visit_id}?aggregator=hhax
+    New aggregator query param. Validated; defaults to 'sandata'.
+
+  POST /api/aggregator/batch?aggregator=hhax
+    New aggregator query param. Queries vi.hhax_status or vi.sandata_status
+    depending on aggregator. Defaults to 'sandata'.
+
+  POST /api/aggregator/submissions/{id}/retry
+    Now reads aggregator from the existing submission record (sub.aggregator)
+    and passes it to _do_submit(). Previously always retried to Sandata.
+
+
+────────────────────────────────────────────────────────────────────────────
+  P3 — Data model additions
+────────────────────────────────────────────────────────────────────────────
+
+File: backend/services/migrations.py — _phase6() (idempotent, runs at startup)
+
+New columns added:
+
+  care.employees.hhax_employee_id    VARCHAR(50)  NULL
+    HHAx caregiverCode. Falls back to employee_code if NULL.
+
+  care.employees.caregiver_type      VARCHAR(20)  NULL
+    Sent to HHAx during pre-registration (e.g. RN, LPN, HHA, DCW).
+    Defaults to 'DCW' in register_caregiver() if NULL.
+
+  care.employees.hhax_registered_at  DATETIME2    NULL
+    Stamped when caregiver is successfully pre-registered with HHAx.
+    NULL means not yet registered.
+
+  care.agencies.agency_tax_id        VARCHAR(20)  NULL
+    Agency EIN in XX-XXXXXXX format. Sent as agencyTaxId.
+    Falls back to HHAX_AGENCY_TAX_ID env var if NULL.
+
+  care.clients.hhax_payer_id         VARCHAR(10)  NULL
+    Client's HHAx MCO payer code (e.g. 17470 = AmeriHealth Caritas PA).
+    Falls back to HHAX_DEFAULT_PAYER_ID env var if NULL.
+
+  care.billing_claims.claim_number      VARCHAR(20)  NULL
+    PA-XXXXXXX format. Generated as PA-{id:07d} on first HHAx claim submit.
+    Reused on retries via COALESCE.
+
+  care.billing_claims.hhax_claim_id     VARCHAR(50)  NULL
+    ClaimId returned by HHAeXchange after upload.
+
+  care.billing_claims.hhax_submitted_at DATETIME2    NULL
+    Timestamp of most recent HHAx claim upload attempt.
+
+File: backend/routers/aggregator.py — _VISIT_SQL
+  Added: e.hhax_employee_id, c.hhax_payer_id, ag.agency_tax_id
+  Added: LEFT JOIN care.agencies ag ON ag.id = v.agency_id
+
+File: backend/routers/caregivers.py
+  Both INSERT paths (agency-aware + fallback) now save:
+    caregiver_type, hhax_employee_id
+
+File: backend/schemas.py
+  CaregiverCreateRequest: added caregiver_type field.
+  BillingClaimDetail: added claim_number, hhax_claim_id, hhax_submitted_at.
+  BillingClaimListItem: added claim_number, hhax_claim_id, hhax_submitted_at.
+
+
+────────────────────────────────────────────────────────────────────────────
+  P4 / P5 — Caregiver pre-registration
+────────────────────────────────────────────────────────────────────────────
+
+File: backend/routers/aggregator.py
+
+New endpoints:
+
+  GET /api/aggregator/caregiver-registrations
+    Lists all active caregivers with is_registered, hhax_registered_at,
+    caregiver_code, name, caregiver_type.
+    Returns totals: total, registered, unregistered.
+
+  POST /api/aggregator/register-caregiver/{employee_id}
+    Registers a single caregiver with HHAx.
+    Returns AlreadyRegistered if hhax_registered_at is already set.
+    Stamps hhax_registered_at on success.
+
+  POST /api/aggregator/register-caregivers/batch
+    Registers all active caregivers where hhax_registered_at IS NULL.
+    Returns { total_processed, registered, failed, results[] }.
+
+File: backend/schemas.py
+  New schemas: CaregiverRegistrationResult, CaregiverRegistrationItem,
+               CaregiverRegistrationListResponse.
+
+
+────────────────────────────────────────────────────────────────────────────
+  P6 — Claims upload connector
+────────────────────────────────────────────────────────────────────────────
+
+File: backend/routers/billing.py
+
+New endpoint:
+
+  POST /api/billing/claims/{claim_id}/submit-hhax
+    Guards: payer must be 'hhax'; blocks Paid/Voided claims.
+    Generates PA-XXXXXXX claim number on first submit (PA-{id:07d}).
+    Derives claimPeriodStart/End from MIN/MAX visit service_date on line items.
+    Calls hhax_svc.post_claim_to_hhax().
+    Stores hhax_claim_id + hhax_submitted_at via COALESCE (safe to retry).
+    Advances status to Submitted on success.
+
+Updated endpoints:
+  GET /api/billing/claims          — now returns claim_number, hhax_claim_id,
+                                     hhax_submitted_at per claim.
+  GET /api/billing/claims/{id}     — same additions.
+
+File: backend/schemas.py
+  New schema: ClaimHhaxSubmitResponse.
+
+
+────────────────────────────────────────────────────────────────────────────
+  Environment variables added (.env)
+────────────────────────────────────────────────────────────────────────────
+
+  HHAX_MODE             = simulate  (live = real HTTP calls)
+  HHAX_BASE_URL         = http://localhost:3000
+  HHAX_CLIENT_ID        = (blank — fill in for live mode)
+  HHAX_CLIENT_SECRET    = (blank — fill in for live mode)
+  HHAX_SCOPE            = (blank — fill in for live mode)
+  HHAX_AGENCY_TAX_ID    = (blank — agency EIN fallback when DB value is null)
+  HHAX_DEFAULT_PAYER_ID = (blank — MCO payer code fallback when not on client)
+  HHAX_TIMEOUT          = 30
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PENDING — BACKEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. GET /api/aggregator/mode response shape changed
+     Now returns {"sandata": "...", "hhax": "..."} instead of {"mode": "..."}.
+     Any frontend code reading response.mode will get undefined.
+     STATUS: Needs frontend update before the aggregator page loads correctly.
+
+  2. No API endpoint to set agency_tax_id
+     care.agencies.agency_tax_id must currently be set directly in the DB
+     or via HHAX_AGENCY_TAX_ID env var.
+     FIX: Add agency_tax_id field to the Settings page / PATCH /api/settings.
+
+  3. No API endpoint to set client hhax_payer_id
+     care.clients.hhax_payer_id must currently be set directly in the DB
+     or via HHAX_DEFAULT_PAYER_ID env var fallback.
+     FIX: Add hhax_payer_id field to the Client profile edit form.
+
+  4. No API endpoint to update employee hhax_employee_id / caregiver_type
+     These are saved on CREATE but there is no PUT/PATCH on employees
+     to update them for existing records.
+     FIX: Add to the Caregiver edit form / employee PATCH endpoint.
+
+  5. scheduleStartTime / scheduleEndTime approximation
+     HHAx requires separate schedule window times. SeriqCare does not store
+     these separately from clock-in/out times. Currently both map to the
+     clock datetimes, which satisfies the simulator but may fail strict
+     production validation.
+     FIX: Add scheduled_start / scheduled_end columns to care.visit_evv or
+     care.visits and populate from the originating schedule record.
+
+  6. _record_submission() response_code column semantics
+     The aggregator_submissions table stores response_code in the txn_id
+     column position. For HHAx this column holds the HTTP status code (201),
+     not a transaction ID. Functionally correct but semantically confusing.
+     FIX: Low priority — rename or add a dedicated hhax_visit_id column
+     to aggregator_submissions if needed for reporting.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PENDING — FRONTEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Aggregator page — HHAx tab / toggle
+     The aggregator queue and submissions history need an aggregator selector
+     (Sandata | HHAeXchange) to pass ?aggregator=hhax to the API.
+     Submit and Batch Submit buttons must pass aggregator param.
+     Mode indicator must read the new {"sandata": ..., "hhax": ...} shape.
+
+  2. Caregivers page — HHAx registration panel
+     Add "HHAeXchange Registration" section showing:
+       - Registration status (registered / not registered)
+       - hhax_registered_at timestamp
+       - "Register" button → POST /api/aggregator/register-caregiver/{id}
+       - "Register All" button → POST /api/aggregator/register-caregivers/batch
+     Add hhax_employee_id and caregiver_type fields to the Create/Edit form.
+
+  3. Clients page — HHAx payer field
+     Add hhax_payer_id dropdown/input to the Client profile edit form.
+     Values: HHAx PayerCodes (17470 AmeriHealth, 28242 UPMC, 11302 Keystone,
+     25133 PA Health & Wellness, or free-text entry).
+
+  4. Billing claims page — Submit to HHAx button
+     For claims where payer = 'hhax', show:
+       - "Submit to HHAeXchange" button → POST /api/billing/claims/{id}/submit-hhax
+       - claim_number, hhax_claim_id, hhax_submitted_at in the claim detail view.
+
+  5. Settings page — HHAx configuration section
+     Add fields for:
+       HHAX_MODE toggle (simulate / live)
+       HHAX_BASE_URL
+       HHAX_AGENCY_TAX_ID (agency EIN)
+       HHAX_DEFAULT_PAYER_ID
+     These map to care.agencies.agency_tax_id (DB) and env vars.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  HOW TO TEST END-TO-END (SIMULATE MODE)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+No live HHAx credentials needed. Simulate mode works out of the box.
+
+Step 1 — Configure .env
+  HHAX_MODE=simulate
+  HHAX_BASE_URL=http://localhost:3000
+  HHAX_AGENCY_TAX_ID=23-1234567
+  HHAX_DEFAULT_PAYER_ID=17470
+
+Step 2 — Restart backend
+  cd backend && uvicorn main:app --reload --port 8000
+
+Step 3 — Register all caregivers
+  POST http://localhost:8000/api/aggregator/register-caregivers/batch
+  Expected: all active caregivers marked as registered (simulated).
+
+Step 4 — Check the HHAx submission queue
+  GET http://localhost:8000/api/aggregator/queue?aggregator=hhax
+  Expected: visits where hhax_status='Ready' and no prior Accepted submission.
+
+Step 5 — Submit a single visit
+  POST http://localhost:8000/api/aggregator/submit/{visit_id}?aggregator=hhax
+  Expected: status=Accepted, hhax_visit_id=VIS-XXXXXXXXX (simulated).
+
+Step 6 — Batch submit all queued HHAx visits
+  POST http://localhost:8000/api/aggregator/batch?aggregator=hhax
+  Expected: BatchSubmitResponse with accepted count.
+
+Step 7 — Submit an HHAx billing claim
+  POST http://localhost:8000/api/billing/generate
+    Body: {"visit_ids": [...], "payer": "hhax"}
+  Then:
+  POST http://localhost:8000/api/billing/claims/{claim_id}/submit-hhax
+  Expected: status=Accepted, claim_number=PA-0000001, hhax_claim_id=CLM-XXXXXXXXX.
+
+Step 8 — View submission history
+  GET http://localhost:8000/api/aggregator/submissions?aggregator=hhax
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  HOW TO SWITCH TO LIVE MODE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Start the HHAx simulator:
+       cd c:\Users\olada\OneDrive\Documents\Care\HHAeXchange
+       npm start        (runs on port 3000)
+
+  2. Update .env:
+       HHAX_MODE=live
+       HHAX_BASE_URL=http://localhost:3000
+       HHAX_CLIENT_ID=<your client_id from simulator seed>
+       HHAX_CLIENT_SECRET=<your client_secret>
+       HHAX_SCOPE=<scope value>
+       HHAX_AGENCY_TAX_ID=23-1234567   (must match HHA.Providers in simulator)
+       HHAX_DEFAULT_PAYER_ID=17470
+
+  3. Restart backend and repeat test steps above.
+     Real HTTP calls will be made; VIS-/CLM-/HHAX- IDs returned by simulator.
+
+
+================================================================================
+  FILE CHANGE SUMMARY
+================================================================================
+
+New files:
+  backend/services/hhax.py
+
+Modified files:
+  backend/services/migrations.py       _phase6() — 8 new columns
+  backend/services/aggregator_router.py (unchanged — routing logic was correct)
+  backend/routers/aggregator.py        _do_submit, batch, retry, mode, + 3 new endpoints
+  backend/routers/caregivers.py        Both INSERTs save caregiver_type + hhax_employee_id
+  backend/routers/billing.py           submit-hhax endpoint; updated claims queries
+  backend/schemas.py                   6 new/updated schemas
+  .env                                 HHAX_* block added
+  package.json                         dev/start ports set to 3001
+
+================================================================================

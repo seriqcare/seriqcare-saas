@@ -1,0 +1,21 @@
+{
+  "agencyName": "SeriqCare Home Health",
+  "email": "ops@seriqcare.com",
+  "phone": "(215) 555-0100",
+  "address": "1234 Healthcare Blvd, Philadelphia PA 19103",
+  "website": "",
+  "timezone": "America/New_York",
+  "currency": "usd",
+  "defaultHourlyRate": "25",
+  "integration_mode": "HHAX",
+  "pay_period": {
+    "frequency": "biweekly",
+    "week_starts_on": "monday",
+    "anchor_date": "2026-04-06",
+    "monthly_day": null,
+    "semi_monthly_days": [
+      1,
+      15
+    ]
+  }
+}

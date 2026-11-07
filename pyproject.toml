@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seriqcare"
+version = "1.0.0"
+description = "HomeCare Management System"
+requires-python = ">=3.8"
+authors = [
+    {name = "Olaniyi Oladapo", email = "support@sericare.com"}
+]
+
+dependencies = [
+    "fastapi==0.115.5",
+    "uvicorn[standard]==0.32.1",
+    "sqlalchemy==2.0.36",
+    "pyodbc==5.2.0",
+    "python-dotenv==1.0.1",
+    "jinja2==3.1.4",
+    "python-multipart==0.0.18",
+    "passlib[bcrypt]==1.7.4",
+    "bcrypt==4.0.1",
+    "python-jose==3.5.0",
+    "pydantic==2.10.3",
+    "pydantic-settings==2.6.1",
+    "weasyprint==62.3",
+    "azure-identity>=1.14.0",
+    "azure-keyvault-secrets>=4.7.0",
+    "tzdata>=2025.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "flake8>=4.0",
+]
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pip]
+# Use only pre-built wheels when possible to avoid compilation issues on Render
+no-binary = []  # Allow all wheels
+only-binary = []  # Don't force binary-only
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:knowledge.hhaexchange.com)",
+      "WebFetch(domain:hhaxsupport.s3.amazonaws.com)",
+      "WebFetch(domain:www.pa.gov)",
+      "Bash(Remove-Item -Recurse -Force \"C:\\\\Users\\\\olada\\\\OneDrive\\\\Documents\\\\Care\\\\seriqcare_app_release\\\\.next\")",
+      "Bash(npm run:*)",
+      "Read(//usr/**)",
+      "Read(//usr/local/**)",
+      "Bash(command -v py)",
+      "Bash(py -c \":*)"
+    ]
+  }
+}

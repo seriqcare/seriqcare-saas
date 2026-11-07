@@ -1,0 +1,178 @@
+================================================================================
+Phase 5 Session Notes — Visits Table Split
+Date: 2026-03-20
+================================================================================
+
+CONTEXT & MOTIVATION
+--------------------
+The agency may use both Sandata (ODP/Waiver services) and HHAeXchange (PDA/MA
+services) simultaneously. The original wide care.visits table mixed EVV clock
+data, billing data, and aggregator integration data into one ~25-column row,
+with ~15 NULLs on a freshly created visit. This session split it into 4
+focused tables with clean domain separation.
+
+This work is part of a larger implementation plan (7 sessions total) to support:
+  - Dual aggregator (Sandata + HHAeXchange) running simultaneously
+  - Tabbed visits page: [All Visits] [Sandata] [HHAeXchange]
+  - Dual toggle settings UI (replacing single provider dropdown)
+
+
+DESIGN DECISIONS MADE THIS SESSION
+------------------------------------
+
+1. VISITS TABLE SPLIT (agreed)
+   care.visits                  → identity only (13 columns)
+   care.visit_evv               → EVV clock/GPS data + validity status (1:1)
+   care.visit_billing           → billing units + approval (1:1)
+   care.visit_integration_status → aggregator submission tracking (1:1, covers both)
+
+2. STATUS VOCABULARY (agreed)
+
+   evv_status (in visit_evv):
+     Pending   → Visit not complete or not yet validated
+     Verified  → Passes all EVV checks
+     Failed    → Has issues, blocked from submission
+     Adjusted  → Manually corrected, now valid
+     Exempt    → EVV not required for this service type
+
+   approval_status (in visit_billing):
+     Pending   → Not yet reviewed
+     Approved  → Units approved for payment
+     Denied    → Units denied
+
+   sandata_status / hhax_status (in visit_integration_status):
+     Draft     → Not ready to send
+     Ready     → Passes EVV, queued for submission
+     Submitted → Sent to external system
+     Accepted  → Successfully processed by external system
+     Rejected  → External system rejected it
+
+   State gate rule: only evv_status IN ('Verified','Adjusted','Exempt')
+   can move to submission status = Ready.
+
+3. VISIT_INTEGRATION_STATUS — ONE ROW, TWO AGGREGATORS
+   A single row per visit covers both Sandata AND HHAeXchange independently:
+     visit_id_sandata + sandata_status + sandata_last_at
+     hhax_visit_id    + hhax_status    + hhax_last_at
+   This is the "latest snapshot" table. Full submission history lives in
+   care.aggregator_submissions (many rows per visit, tagged with aggregator column).
+
+4. DUAL AGGREGATOR SETTINGS (agreed, not yet implemented)
+   Change AggregatorForm type from:
+     { enabled: boolean, provider: 'sandata_pa'|'hhaexchange_pa'|'' }
+   To:
+     { sandata_enabled: boolean, hhax_enabled: boolean }
+   Each aggregator saves independently to its own localStorage key.
+   UI becomes two independent toggle+credential blocks (not a dropdown).
+   Added field: hhax_branch_id (HHAeXchange-specific, not needed by Sandata).
+
+5. VISITS PAGE TABS (agreed, not yet implemented — Session 6)
+   /visits shows: [All Visits] [Sandata] [HHAeXchange]
+   Tabs are conditional — only shown when that aggregator is enabled in settings.
+
+6. AGGREGATOR ROUTING LOGIC (agreed, not yet implemented — Session 4D)
+   ODP service codes → Sandata
+   PDA service codes → HHAeXchange
+   One visit routes to one aggregator (service codes are always distinct).
+
+
+EVICTION STATUS MAPPING (old → new, used in migration)
+--------------------------------------------------------
+Old care.visits.evv_status  →  visit_evv.evv_status  /  sandata_status
+
+  'Incomplete'  →  evv_status='Pending',   sandata_status='Draft'
+  'Ready'       →  evv_status='Verified',  sandata_status='Ready'
+  'Submitted'   →  evv_status='Verified',  sandata_status='Submitted'
+  'Omit'        →  evv_status='Exempt',    sandata_status=NULL
+
+
+SCRIPTS PRODUCED
+----------------
+sql/seriqcare_evv_phase5_migration.sql  — main forward migration
+sql/seriqcare_evv_phase5_revert.sql     — full rollback script
+sql/seriqcare_evv_phase5_fix.sql        — fix for Msg 207 + @df stale variable
+sql/seriqcare_evv_phase5_fix2.sql       — fix for IX_visits_approval blocking evv_status
+sql/seriqcare_evv_phase5_fix3.sql       — fix for CK_visits_approval_status blocking approval_status
+
+
+BUGS ENCOUNTERED AND ROOT CAUSES
+----------------------------------
+
+Bug 1 — Msg 207: Invalid column name 'aggregator'
+  Cause: SQL Server compiles an entire BEGIN..END block before execution.
+         Referencing a newly-added column in the same block as ALTER TABLE ADD
+         fails at compile time, before the ALTER even runs.
+  Fix:   Separate ALTER TABLE ADD and the UPDATE into different GO batches.
+  Rule:  Never reference a newly-added column in the same GO batch as the ADD.
+
+Bug 2 — Msg 3728: constraint 'DF__visits__call_in___32AB8735' is not a constraint
+  Cause: Cursor variable @df was declared once at batch level but not reset to
+         NULL on each loop iteration. When call_in_method had a default constraint,
+         @df was set to its name. On the next iteration (call_out_datetime), the
+         SELECT returned no rows (no default constraint on that column), but @df
+         retained the old value. The script tried to drop an already-dropped
+         constraint, got Msg 3728, then Msg 3727 blocked the column drop.
+  Fix:   SET @df = NULL at the top of every cursor iteration before the SELECT.
+  Rule:  Always reset reused DECLARE variables at the start of each loop iteration.
+
+Bug 3 — Msg 5074: index 'IX_visits_approval' is dependent on column 'evv_status'
+  Cause: IX_visits_approval was a composite index ON care.visits (approval_status,
+         evv_status) INCLUDE (agency_id, service_date). SQL Server won't drop a
+         column that is referenced by an index. The migration script's Step 2 only
+         dropped non-unique, non-PK indexes matching the column list, but the
+         idempotent guard in Step 1 had already dropped IX_visits_approval by name.
+         The fix script's defensive cursor then found it blocking the drop.
+  Fix:   Explicitly drop IX_visits_approval before attempting to drop evv_status.
+  Rule:  Before dropping any column, query sys.indexes + sys.index_columns to find
+         ALL indexes referencing it. Drop them all first.
+
+Bug 4 — Msg 4922: CHECK constraint 'CK_visits_approval_status' blocks approval_status
+  Cause: CK_visits_approval_status was a CHECK constraint on the approval_status
+         column. SQL Server won't drop a column with an active CHECK constraint.
+  Fix:   Explicitly drop CK_visits_approval_status before dropping the column.
+  Rule:  Also query sys.check_constraints for column-level CHECK constraints before
+         any column drop — not just table-level named constraints.
+
+Verification bug — Msg 209: Ambiguous column name 'name'
+  Cause: A SELECT in the verification block used unqualified 'name' in a query
+         that joined sys.columns and sys.default_constraints, both of which have
+         a 'name' column.
+  Fix:   Always qualify as c.name when joining sys.columns.
+
+
+ORIGINAL IX_VISITS_APPROVAL DEFINITION (for revert script)
+------------------------------------------------------------
+CREATE INDEX IX_visits_approval
+    ON care.visits (approval_status, evv_status)
+    INCLUDE (agency_id, service_date);
+
+This index was created in sql/seriqcare_evv_phase3_migration.sql.
+It is recreated in the revert script (Step 4C).
+
+
+FINAL PHASE 1 STATE
+--------------------
+Tables created:   care.visit_evv, care.visit_billing, care.visit_integration_status
+Rows migrated:    14 visits → 14 rows in each child table
+Columns removed:  17 columns removed from care.visits
+Columns added:    care.visits.agency_id, care.employees.hhax_employee_id,
+                  care.clients.hhax_member_id, care.clients.hhax_branch_id,
+                  care.aggregator_submissions.aggregator (backfilled 'sandata')
+Backup tables:    care.*_bak_20260320 (retain until stable, then drop manually)
+
+
+REMAINING SESSIONS
+------------------
+Session 2: db/models.py         — Split Visit model into 4 SQLAlchemy models
+Session 3: backend/schemas.py   — New Pydantic schemas for child tables
+Session 4A: mobile_visits.py    — clock-in/out writes to visit_evv
+Session 4B: visits.py + new services (evv_validation.py, aggregator_router.py)
+Session 5: settings/page.tsx    — Dual aggregator toggle UI
+Session 6: visits/page.tsx      — Tabbed visits page
+Session 7: evv/page.tsx         — Aggregator-aware EVV page
+
+To start Session 2, say:
+  "We're on Session 2 of the visits schema split. Check your memory for
+   project_visits_schema_split and implement the SQLAlchemy models in db/models.py."
+
+================================================================================

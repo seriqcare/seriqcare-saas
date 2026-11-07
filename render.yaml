@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: seriqcare-api
+    dockerfilePath: ./Dockerfile
+
+    # Render routes external traffic to $PORT; uvicorn reads PORT automatically.
+    healthCheckPath: /api/health
+
+    autoDeploy: true
+
+    envVars:
+      # ── Runtime behaviour ──────────────────────────────────────────────────
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: ENV
+        value: "prod"
+
+      # ── Database (Azure SQL) ───────────────────────────────────────────────
+      # Set these in the Render dashboard (not here – they are sensitive)
+      - key: DB_SERVER
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: ODBC_DRIVER
+        value: "ODBC Driver 17 for SQL Server"
+
+      # ── Service Principal ──────────────────────────────────────────────────
+      - key: DB_CLIENT_ID
+        sync: false
+      - key: DB_CLIENT_SECRET
+        sync: false
+      - key: DB_TENANT_ID
+        sync: false
+
+      # ── App secrets ────────────────────────────────────────────────────────
+      - key: SECRET_KEY
+        generateValue: true
+
+      # ── CORS ───────────────────────────────────────────────────────────────
+      # Set to your Vercel frontend URL, e.g. https://seriqcare.vercel.app
+      # Comma-separate multiple origins if needed.
+      - key: CORS_ORIGINS
+        sync: false

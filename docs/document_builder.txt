@@ -1,0 +1,524 @@
+You are a senior full-stack engineer. Implement a **Structured Documentation Template Builder** for my multi-agency home care SaaS called **SeriqCare**.
+
+## Product context
+
+SeriqCare is a multi-agency home care application. Different agencies use the same platform, so **strict agency isolation** is mandatory. One agency must never see another agency’s templates, submissions, patients, or staff data.
+
+The feature to build is **Documentation Templates**. Agency admins should be able to create their own structured documentation templates without code, publish them, and let caregivers/staff fill them out during visits or for general care documentation.
+
+This is **not** a pure WYSIWYG editor. It is a **structured template builder** with sections and fields. We may support a rich text instruction block, but the foundation must be structured fields.
+
+## Goal
+
+Build a production-ready first version of a **Structured Documentation Template Builder** with:
+
+* template creation
+* section-based template design
+* configurable structured fields
+* publish/unpublish workflow
+* template versioning
+* dynamic form rendering
+* submission storage
+* agency isolation
+* role-based permissions
+* audit-safe design
+* clean, professional UI
+
+## Tech assumptions
+
+Use the stack below unless clearly impossible:
+
+* Backend: FastAPI
+* Database: SQL Server
+* ORM/data access: SQLAlchemy
+* Frontend web UI: server-rendered/Jinja2 + Bootstrap or clean professional CSS
+* Mobile support: design the backend/API and JSON schema so Flutter/mobile can render the same templates later
+* Authentication: use the existing SeriqCare auth patterns and current user / agency context
+* Follow good modular architecture and avoid tightly coupled code
+
+## Core business requirements
+
+### 1. Agency isolation
+
+Every template, template version, submission, and submission value must belong to an `agency_id`.
+All queries must be scoped to the logged-in user’s agency unless explicitly global system data is intended.
+Do not rely only on the UI for isolation. Enforce it in backend service/repository logic too.
+
+### 2. Roles and permissions
+
+Implement at least these permissions:
+
+* Agency Admin:
+
+  * create templates
+  * edit draft templates
+  * publish templates
+  * archive templates
+  * view all submissions for their agency
+* Caregiver / Staff:
+
+  * view templates assigned/available to them
+  * create submissions
+  * save drafts
+  * submit completed documentation
+* Supervisor/Admin:
+
+  * review submitted documentation
+  * read all agency submissions
+
+If role model already exists, integrate with it. Otherwise implement a minimal permission check pattern.
+
+### 3. Template builder
+
+Agency Admin can:
+
+* create a template
+* set template name
+* set description
+* set category
+* add sections
+* reorder sections
+* add fields inside sections
+* reorder fields
+* configure field settings
+* save template as draft
+* publish template
+* archive template
+
+### 4. Supported field types for v1
+
+Implement these field types:
+
+* short_text
+* long_text
+* number
+* date
+* time
+* datetime
+* dropdown
+* radio
+* checkbox
+* yes_no
+* signature_placeholder
+* file_upload_placeholder
+* instruction_block
+* staff_selector
+* patient_selector
+
+Notes:
+
+* `instruction_block` is display-only, not an input
+* `signature_placeholder` and `file_upload_placeholder` can be implemented in an MVP-safe way if full signature/file capture is not yet completed
+* `staff_selector` and `patient_selector` should integrate with agency-scoped staff/patient data
+* all field types should share a consistent schema shape
+
+### 5. Field configuration
+
+Each field should support relevant config such as:
+
+* `field_key`
+* `label`
+* `help_text`
+* `placeholder`
+* `required`
+* `default_value`
+* `options` for dropdown/radio
+* `min_length`
+* `max_length`
+* `min_value`
+* `max_value`
+* `sort_order`
+* `width` or layout hint if useful
+* `is_active`
+
+Do not overcomplicate the first version, but keep the schema extensible.
+
+### 6. Template versioning
+
+This is very important.
+
+Requirements:
+
+* A published template becomes immutable for active use
+* If an admin edits a published template, create a **new version**
+* Old submissions must remain tied to the old template version
+* A submission must store both:
+
+  * `template_id`
+  * `template_version`
+* It must remain possible to render historic submissions exactly as they were when completed
+
+### 7. Submission workflow
+
+Staff should be able to:
+
+* open a template
+* fill it dynamically
+* save as draft
+* submit when complete
+
+Statuses for submissions:
+
+* draft
+* submitted
+* reviewed (optional for v1 if easy)
+* approved (optional for v1 if easy)
+
+On submit:
+
+* validate required fields
+* validate field types
+* store values safely
+* block cross-agency access
+
+### 8. Assignment model
+
+Design the system so templates can later be assigned by:
+
+* service
+* program
+* visit type
+* patient
+* payer workflow
+
+For v1, it is okay to keep assignment simple, such as:
+
+* manual availability by agency
+* optional category
+* optional “usable during visit documentation”
+
+But structure the code so later assignment rules can be added cleanly.
+
+## Database design
+
+Design normalized tables where helpful, but allow JSON where it improves flexibility.
+
+Implement a clean schema similar to this:
+
+### documentation_templates
+
+* id
+* agency_id
+* name
+* description
+* category
+* status (draft, published, archived)
+* current_version
+* created_by
+* created_at
+* updated_at
+
+### documentation_template_versions
+
+* id
+* template_id
+* version_number
+* schema_json
+* status
+* created_by
+* created_at
+
+### documentation_template_sections
+
+If needed as a separate table, or embed in schema_json. Choose the best design and explain briefly in comments.
+Possible columns:
+
+* id
+* template_version_id
+* title
+* description
+* sort_order
+
+### documentation_template_fields
+
+If needed as a separate table, or embed in schema_json.
+Possible columns:
+
+* id
+* template_version_id
+* section_key / section_id
+* field_key
+* field_type
+* label
+* config_json
+* sort_order
+
+### documentation_submissions
+
+* id
+* agency_id
+* template_id
+* template_version_id or template_version_number
+* patient_id nullable
+* staff_id nullable
+* visit_id nullable
+* status
+* values_json
+* submitted_at
+* created_by
+* created_at
+* updated_at
+
+### documentation_submission_reviews (optional if light-weight)
+
+* id
+* submission_id
+* reviewer_id
+* review_status
+* comments
+* reviewed_at
+
+Choose a practical design. It is acceptable to store the template schema in `schema_json` and submission answers in `values_json` for flexibility, while still keeping core metadata in columns.
+
+## JSON schema expectations
+
+### Example template schema
+
+Use a consistent JSON structure like:
+
+```json
+{
+  "template_name": "Daily Care Note",
+  "category": "progress_note",
+  "version": 1,
+  "sections": [
+    {
+      "key": "visit_information",
+      "title": "Visit Information",
+      "sort_order": 1,
+      "fields": [
+        {
+          "key": "visit_date",
+          "type": "date",
+          "label": "Visit Date",
+          "required": true
+        },
+        {
+          "key": "start_time",
+          "type": "time",
+          "label": "Start Time",
+          "required": true
+        }
+      ]
+    },
+    {
+      "key": "observations",
+      "title": "Observations",
+      "sort_order": 2,
+      "fields": [
+        {
+          "key": "mood",
+          "type": "dropdown",
+          "label": "Mood",
+          "required": false,
+          "options": [
+            {"label": "Calm", "value": "calm"},
+            {"label": "Anxious", "value": "anxious"},
+            {"label": "Agitated", "value": "agitated"}
+          ]
+        },
+        {
+          "key": "notes",
+          "type": "long_text",
+          "label": "Notes",
+          "required": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Example submission values
+
+```json
+{
+  "visit_date": "2026-04-06",
+  "start_time": "09:00",
+  "mood": "calm",
+  "notes": "Patient was stable and cooperative."
+}
+```
+
+## Backend architecture requirements
+
+Implement clean modules:
+
+* models
+* schemas / pydantic DTOs
+* repositories or data access layer
+* services/business logic
+* routes/controllers
+* template rendering helper
+* validation helper
+
+### Required backend capabilities
+
+1. Create template draft
+2. Get template list for agency
+3. Get single template detail
+4. Update draft template
+5. Publish template
+6. Archive template
+7. Clone template into new version when editing published template
+8. Render template for completion
+9. Save submission draft
+10. Submit completed submission
+11. List submissions
+12. View submission detail
+
+### Validation
+
+Implement strong validation:
+
+* required field validation
+* allowed option validation
+* type validation
+* numeric/date/time sanity
+* unknown field rejection or safe handling
+* template version consistency validation
+
+### Security
+
+* enforce agency scoping in service layer
+* do not trust client-submitted template metadata
+* on submission, load the template version from DB and validate values against it
+* prevent users from submitting against another agency’s template
+* protect against hidden-field spoofing
+
+## Frontend/UI requirements
+
+Build clean web pages for:
+
+### 1. Templates list page
+
+Show:
+
+* template name
+* category
+* current status
+* current version
+* created/updated date
+* actions:
+
+  * view
+  * edit draft
+  * publish
+  * archive
+  * create new version
+
+### 2. Template builder page
+
+Admin UI should support:
+
+* template metadata fields
+* add section
+* edit section
+* remove section
+* move section up/down
+* add field
+* edit field configuration
+* remove field
+* move field up/down
+* preview mode
+
+A polished simple builder is enough. It does not need advanced drag-and-drop if that adds too much complexity. Up/down ordering buttons are fine for v1.
+
+### 3. Template preview / fill page
+
+Render the structured form dynamically from schema.
+Support:
+
+* grouped sections
+* proper field rendering by type
+* required field indicators
+* save draft
+* submit
+
+### 4. Submission list/detail pages
+
+Show:
+
+* template used
+* patient/staff/visit reference if present
+* status
+* created/submitted dates
+* detail view of responses rendered clearly
+
+## UX expectations
+
+* professional healthcare SaaS look
+* simple and not cluttered
+* clear section cards
+* strong labels/help text
+* consistent button styling
+* safe empty states
+* server-side validation messages shown clearly
+* no flashy design
+
+## Implementation choices
+
+Make reasonable engineering choices without asking for repeated clarification.
+If there is ambiguity, choose the most practical production-safe approach and document it in code comments.
+
+## Deliverables
+
+Provide actual implementation code, not only explanation.
+
+I want:
+
+1. SQLAlchemy models
+2. Alembic or SQL migration scripts
+3. Pydantic request/response schemas
+4. FastAPI routes
+5. service layer logic
+6. Jinja templates / HTML pages
+7. reusable form rendering helper
+8. validation helper
+9. role/agency guard logic
+10. concise setup notes
+
+## Important design preferences
+
+* keep code modular
+* keep names clean and explicit
+* do not over-engineer
+* use JSON where it reduces schema rigidity
+* preserve version history
+* optimize for future Flutter/mobile rendering
+* ensure audit-safe historical rendering
+* ensure multi-agency data isolation everywhere
+
+## Nice-to-have if reasonably easy
+
+* duplicate existing template
+* starter categories
+* review status on submissions
+* audit log hook points
+* printable submission detail page
+
+## Output format
+
+Please produce the implementation in this order:
+
+1. brief architecture summary
+2. database models/migrations
+3. Pydantic schemas
+4. service layer
+5. routes
+6. template rendering helper
+7. Jinja/HTML templates
+8. notes on how to wire into existing auth/user/agency context
+
+When writing code:
+
+* include file names
+* keep code cohesive and realistic
+* avoid placeholders unless absolutely necessary
+* if something depends on an existing auth helper, clearly mark the integration point
+* prefer production-usable code over pseudo-code
+
+Also:
+
+* assume this feature will later connect to visit documentation, patient records, and mobile app rendering
+* make sure the schema and APIs are future-proof enough for those integrations

@@ -1,0 +1,807 @@
+================================================================================
+  HHAEXCHANGE PENNSYLVANIA EVV API — SPECIFICATION RESEARCH & SIMULATOR FIX
+  Generated: 2026-03-22
+  Purpose:   Documents all research findings from the real HHAeXchange PA spec
+             and provides exact instructions to fix the HHAeXchange API Simulator
+             so it reflects correct Pennsylvania field formats.
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 1 — SOURCES REVIEWED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The following official HHAeXchange and Pennsylvania DHS sources were consulted:
+
+1. Pennsylvania Tempus EVV Data Aggregator API Specifications
+   URL: https://knowledge.hhaexchange.com/edi/Content/Documentation/EDI/API-EVV-Data-Aggregator-Specs-PA-P.htm
+   Status: Page is behind JavaScript/OAuth login wall — partial content retrieved
+   Key findings:
+     - Confirms Pennsylvania uses HHAeXchange as the EVV aggregator (Tempus program)
+     - Third-party EVV systems submit via JSON REST API
+     - Max 100 EVV records per request
+     - EVVMSID is the unique visit identifier returned by HHAeXchange
+
+2. API Processing Workflow and Endpoints
+   URL: https://knowledge.hhaexchange.com/edi/Content/Documentation/EDI/API-Workflow-Endpoints-P.htm
+   Status: Partial content retrieved
+   Key findings:
+     - Authentication: OAuth 2.0 client credentials flow
+     - Token endpoint: POST /identity/connect/token
+     - Required params: client_id, client_secret, scope (issued by HHAeXchange)
+     - Token expiry: 30 minutes; 401 returned when expired
+     - Caregiver endpoint: POST /api/v{version}/caregivers
+     - Visit endpoints:
+         POST   /api/v{version}/visits              (submit new)
+         PUT    /api/v{version}/visits/{evvmsid}    (update)
+         DELETE /api/v{version}/visits/{evvmsid}    (delete)
+         GET    /api/v{version}/visits/transactions/{transactionId}  (check status)
+     - EVVMSID format: alphanumeric + dashes/underscores, max 64 chars
+     - External EVVMSID: must be prefixed with tilde (~) to distinguish from
+       HHAeXchange-derived IDs
+     - CRITICAL: Caregiver record MUST be sent before visit record
+
+3. Pennsylvania EDI Codes Table
+   URL: https://knowledge.hhaexchange.com/edi/Content/Documentation/EDI/EDI-Code-Table-PA-P.htm
+   Status: Successfully retrieved
+   Key findings:
+     - Real field names confirmed: AgencyTaxId, CaregiverCode, MedicaidNumber,
+       ProcedureCode, PayerId, ScheduleId, InvoiceNumber
+     - MCO/Payer ID codes (examples):
+         17470 = AmeriHealth Caritas PA
+         28242 = UPMC Home Health
+     - Duties Codes (115-203): task codes submitted with visit
+     - Missed Visit Reason Codes: 508-525
+     - Visit Edit Reason Codes: 100-123
+     - Procedure Codes marked with (*) = authorization not required
+     - Overnight visits crossing midnight must be split into two records
+
+4. FAQ-EVV — Pennsylvania Department of Human Services
+   URL: https://www.pa.gov/agencies/dhs/resources/for-providers/evv/faq-evv
+   Status: Successfully retrieved
+   Key findings:
+     - 6 CMS-mandated EVV data elements required:
+         1. Service type performed
+         2. Individual receiving service
+         3. Individual(s) providing service
+         4. Service location(s)
+         5. Service date(s)
+         6. Service begin and end times
+     - CaregiverCode rule:
+         IF caregiver has Direct Care Workers Unique Registry ID → use that ID
+         ELSE → use last 5 digits of caregiver's Social Security Number
+     - Technical specs contact: PAAltEVV@sandata.com or 855-705-2407
+     - Note: Pennsylvania routes PDA/MA visits through HHAeXchange;
+       ODP waiver visits route through Sandata (separate aggregator)
+
+5. HHAeXchange API Overview Index
+   URL: https://knowledge.hhaexchange.com/edi/Content/Documentation/EDI/API.htm
+   Status: Navigation page — links to state-specific specs
+
+6. New Jersey EVV API Technical Specifications (PDF)
+   URL: https://hhaxsupport.s3.amazonaws.com/SupportDocs/EDI+Guides/EVV+Aggregation/NJ/HHAX+EVV+API+Technical+Specifications_NJ.pdf
+   Status: PDF binary — could not extract text; 82 pages
+
+7. Illinois EVV API Technical Specifications (PDF)
+   URL: https://hhaxsupport.s3.amazonaws.com/SupportDocs/EDI%20Guides/EVV%20Aggregation/IL/HHAX%20EVV%20API%20Technical%20Specifications_%20IL.pdf
+   Status: PDF binary — could not extract text
+
+8. Minnesota EVV API Technical Specifications (PDF)
+   URL: https://hhaxsupport.s3.amazonaws.com/SupportDocs/EDI+Guides/EVV+Aggregation/MN/HHAX+EVV+API+Technical+Specs_MN.pdf
+   Status: PDF binary — could not extract text; 86 pages
+
+NOTE: The full field-level schema (exact JSON keys, all max lengths, all
+validation rules) is contained within the PDF spec documents and the
+login-gated HTML pages. The findings below are synthesized from what was
+publicly accessible. When you obtain full HHAeXchange portal access, the
+complete spec at the PA URL above should be the authoritative reference.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 2 — REAL PENNSYLVANIA HHAEXCHANGE API FIELD SPECIFICATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2A. AUTHENTICATION
+──────────────────
+  Protocol:       OAuth 2.0, client credentials flow
+  Token endpoint: POST /identity/connect/token
+  Body params:    client_id      (issued by HHAeXchange per provider)
+                  client_secret  (issued by HHAeXchange per provider)
+                  scope          (issued by HHAeXchange per provider)
+  Response:       { "access_token": "...", "expires_in": 1800 }
+  Token lifetime: 30 minutes; re-authenticate when 401 is received
+  Usage:          All API calls must include header:
+                  Authorization: Bearer {access_token}
+  TLS:            HTTPS with TLS 1.2 minimum required
+
+
+2B. CAREGIVER RECORD (must be submitted BEFORE visit records)
+─────────────────────────────────────────────────────────────
+  Endpoint:   POST /api/v{version}/caregivers
+  Content-Type: application/json
+
+  Field               Type      Req  Format / Notes
+  ──────────────────  ────────  ───  ────────────────────────────────────────
+  CaregiverCode       String    REQ  Direct Care Workers Unique Registry ID
+                                     if available; otherwise last 5 digits
+                                     of caregiver's SSN.
+                                     Maps to: care.employees.employee_code
+                                     NO prefix required. No "CAREGIVER-" prefix.
+
+  FirstName           String    REQ  Caregiver first name
+  LastName            String    REQ  Caregiver last name
+  SSN                 String    SIT  Social Security Number (when no Registry ID)
+  AgencyTaxId         String    REQ  Agency EIN in format: XX-XXXXXXX
+                                     (e.g. "23-1234567")
+                                     Maps to: care.agencies.state_provider_id
+                                     or care.providers EIN field
+
+  Response:   HTTP 200/201 + TransactionId
+  CRITICAL:   Visit submission will be REJECTED if the CaregiverCode
+              sent in the visit does not already exist in HHAeXchange.
+
+
+2C. VISIT RECORD (EVV Submission)
+──────────────────────────────────
+  Endpoint:   POST /api/v{version}/visits
+  Content-Type: application/json
+  Max records per request: 100
+
+  Field                     Type      Req  Format / Notes
+  ────────────────────────  ────────  ───  ──────────────────────────────────────
+  EVVMSID                   String    SIT  Unique visit identifier.
+                                           If provided by 3rd party, must be
+                                           prefixed with tilde: ~{your_id}
+                                           Alphanumeric + dashes/underscores only.
+                                           Max length: 64 characters (excl. ~)
+                                           Maps to: care.visits.id (formatted)
+                                           Example: ~VIS-000123
+
+  AgencyTaxId               String    REQ  EIN format: XX-XXXXXXX
+                                           Provider/agency identifier.
+                                           NOT the NPI. NOT "PROV-" prefix.
+                                           Maps to: care.agencies.state_provider_id
+
+  CaregiverCode             String    REQ  Same value as used in Caregiver record.
+                                           Registry ID or last-5 SSN.
+                                           Maps to: care.employees.employee_code
+
+  MedicaidNumber            String    REQ  Client's PA Medicaid ID (state-assigned).
+                                           No fixed prefix required.
+                                           Maps to: care.clients.medicaid_id
+
+  ProcedureCode             String    REQ  HCPCS code — standard 5-character format.
+                                           1 letter + 4 alphanumeric chars.
+                                           Examples: W7060, T1019, S5125, H2015
+                                           NOT a 3-digit number.
+                                           Maps to: care.service_codes.hcpcs_code
+
+  PayerId                   String    REQ  MCO/Payer numeric code.
+                                           Examples:
+                                             17470 = AmeriHealth Caritas PA
+                                             28242 = UPMC Home Health
+                                           Maps to: payer/MCO on service auth
+
+  ScheduleId                String    REQ  Schedule identifier.
+                                           Maps to: care.schedules.id (formatted)
+
+  ScheduleStartTime         DateTime  REQ  UTC format: YYYY-MM-DDTHH:MM:SSZ
+                                           Scheduled start of visit window.
+                                           Maps to: care.schedules.scheduled_start
+
+  ScheduleEndTime           DateTime  REQ  UTC format: YYYY-MM-DDTHH:MM:SSZ
+                                           Scheduled end of visit window.
+                                           Maps to: care.schedules.scheduled_end
+
+  ClockInDatetime           DateTime  SIT  UTC format: YYYY-MM-DDTHH:MM:SSZ
+                                           Actual EVV clock-in timestamp.
+                                           Maps to: care.visit_evv.call_in_datetime
+                                           Required if ClockOutDatetime is provided.
+
+  ClockOutDatetime          DateTime  SIT  UTC format: YYYY-MM-DDTHH:MM:SSZ
+                                           Actual EVV clock-out timestamp.
+                                           Maps to: care.visit_evv.call_out_datetime
+                                           If omitted, visit is unconfirmed.
+
+  ClockInServiceLocationType  String  REQ  Location type code at clock-in.
+                                           (e.g. Home, Community — see code table)
+                                           Maps to: care.visit_evv location fields
+
+  ClockInServiceLocationAddress String REQ  Address at clock-in.
+                                            Maps to: care.clients address fields
+
+  ClockOutServiceLocationType String  REQ  Location type code at clock-out.
+
+  ClockOutServiceLocationAddress String REQ Address at clock-out.
+
+  InvoiceNumber             String    SIT  Required for billed visits.
+                                           Alphanumeric claim/invoice reference.
+                                           Maps to: billing claim number
+
+  MissedVisit               Boolean   OPT  true if visit was not completed.
+
+  MissedVisitReasonCode     String    SIT  Required if MissedVisit = true.
+                                           Codes 508-525 (see PA code table).
+
+  MissedVisitActionCode     String    SIT  Required if MissedVisit = true.
+
+  VisitEditReasonCode       String    SIT  Required when updating existing visit.
+                                           Codes 100-123 (see PA code table).
+
+  DutyCodes                 Array     OPT  List of task/duty codes completed.
+                                           Codes 115-203 (see PA code table).
+                                           Example: ["115", "120", "135"]
+
+  OVERNIGHT VISIT RULE:
+    If a visit crosses midnight, it MUST be split into two separate records:
+      Record 1: original date, start time → 23:59:59
+      Record 2: next date, 00:00:00 → actual end time
+    Both records share the same ScheduleId.
+
+
+2D. RESPONSE FORMAT
+───────────────────
+  Successful submission returns:
+    HTTP 200 or 202
+    Body: { "TransactionId": "...", "EVVMSID": "..." }
+
+  The EVVMSID returned should be stored in:
+    care.visit_integration_status.hhax_visit_id
+
+  Check submission status:
+    GET /api/v{version}/visits/transactions/{transactionId}
+    Returns: { "Status": "Accepted|Rejected|Pending", "EVVMSID": "..." }
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 3 — GAP ANALYSIS: SIMULATOR vs REAL SPEC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Field           Simulator (current)          Real PA HHAeXchange Spec
+  ──────────────  ───────────────────────────  ─────────────────────────────────
+  providerId      Must start with "PROV-"      AgencyTaxId: EIN XX-XXXXXXX
+                  e.g. PROV-PA-2024-001         e.g. 23-1234567
+
+  caregiverId     Must start with "CAREGIVER-" CaregiverCode: Registry ID or
+                  e.g. CAREGIVER-001            last-5 SSN. No prefix.
+                                               e.g. 12345  or  DCW-PA-00123
+
+  patientId       Must start with "PATIENT-"   MedicaidNumber: PA Medicaid ID.
+                  e.g. PATIENT-001             No prefix required.
+                                               e.g. 1234567A or 600012345
+
+  serviceCode     3-digit number string        ProcedureCode: HCPCS 5-char code.
+                  e.g. "102"                   e.g. "W7060", "T1019", "S5125"
+
+  visitDate       YYYY-MM-DD                   ScheduleStartTime: full UTC datetime
+                  (date only)                  e.g. 2026-03-10T09:00:00Z
+
+  startTime       HH:MM (24-hour string)       ClockInDatetime: full UTC datetime
+  endTime         HH:MM (24-hour string)       ClockOutDatetime: full UTC datetime
+
+  Authentication  None (no auth on simulator)  OAuth 2.0 bearer token required
+
+  Caregiver API   None (no separate endpoint)  Must submit caregiver BEFORE visit
+
+  EVVMSID         Not returned                 Returned in response; store it.
+                                               External IDs prefixed with ~
+
+  PayerId         Not in simulator             Required field (MCO code)
+
+  Location fields Not in simulator             ClockIn/Out address + type required
+
+  DutyCodes       Not in simulator             Optional array of task codes
+
+  Overnight split Not enforced                 Mandatory — visits split at midnight
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 4 — INSTRUCTIONS TO FIX THE HHAEXCHANGE API SIMULATOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Simulator root folder: c:\Users\olada\OneDrive\Documents\Care\HHAeXchange\
+  These instructions are meant to be given directly to Claude to implement.
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 1 — Rename fields in HHA.Visits table (sql/schema.sql)
+────────────────────────────────────────────────────────────────────────────
+
+  Current column   →  New column name
+  ───────────────────────────────────
+  ProviderId       →  AgencyTaxId          NVARCHAR(20)  (EIN: XX-XXXXXXX)
+  CaregiverId      →  CaregiverCode        NVARCHAR(50)  (Registry ID or last-5 SSN)
+  PatientId        →  MedicaidNumber       NVARCHAR(20)  (PA Medicaid ID)
+  ServiceCode      →  ProcedureCode        NVARCHAR(10)  (HCPCS code)
+  StartTime        →  ClockInDatetime      DATETIME2     (was NVARCHAR HH:MM)
+  EndTime          →  ClockOutDatetime     DATETIME2     (was NVARCHAR HH:MM)
+  VisitDate        →  ScheduleDate         DATE          (keep for reference)
+  Status           →  Status               NVARCHAR(20)  (submitted/approved — keep)
+
+  ADD new columns to HHA.Visits:
+    ScheduleId                NVARCHAR(50)   NULL
+    ScheduleStartTime         DATETIME2      NULL
+    ScheduleEndTime           DATETIME2      NULL
+    PayerId                   NVARCHAR(10)   NULL
+    ClockInServiceLocationType   NVARCHAR(50) NULL
+    ClockInServiceLocationAddress NVARCHAR(255) NULL
+    ClockOutServiceLocationType  NVARCHAR(50) NULL
+    ClockOutServiceLocationAddress NVARCHAR(255) NULL
+    InvoiceNumber             NVARCHAR(50)   NULL
+    MissedVisit               BIT            NOT NULL DEFAULT 0
+    MissedVisitReasonCode     NVARCHAR(10)   NULL
+    MissedVisitActionCode     NVARCHAR(10)   NULL
+    DutyCodes                 NVARCHAR(500)  NULL  (pipe-separated list)
+    ExternalEVVMSID           NVARCHAR(64)   NULL  (caller-supplied ~prefixed ID)
+    EVVMSID                   NVARCHAR(64)   NULL  (HHAeXchange-assigned, store response)
+
+  UPDATE the UNIQUE INDEX:
+    Remove old:  UNIQUE on (ProviderId, CaregiverId, PatientId, VisitDate, StartTime, EndTime)
+    Add new:     UNIQUE FILTERED on (ExternalEVVMSID) WHERE ExternalEVVMSID IS NOT NULL
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 2 — Add HHA.Caregivers registration table updates (sql/schema.sql)
+────────────────────────────────────────────────────────────────────────────
+
+  Rename columns in HHA.Caregivers:
+    CaregiverId   →  CaregiverCode     NVARCHAR(50)  (Registry ID or last-5 SSN)
+    CaregiverType →  CaregiverType     NVARCHAR(20)  keep (RN/LPN/HHA)
+    ProviderId    →  AgencyTaxId       NVARCHAR(20)  (EIN format)
+
+  ADD new columns to HHA.Caregivers:
+    SSN           NVARCHAR(9)    NULL   (last 5 digits when no Registry ID)
+    NPI           NVARCHAR(10)   NULL
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 3 — Add HHA.Patients (Clients) table updates (sql/schema.sql)
+────────────────────────────────────────────────────────────────────────────
+
+  Rename columns in HHA.Patients:
+    PatientId     →  MedicaidNumber    NVARCHAR(20)  (PA Medicaid ID)
+    ProviderId    →  AgencyTaxId       NVARCHAR(20)
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 4 — Add HHA.ServiceCodes table updates (sql/schema.sql)
+────────────────────────────────────────────────────────────────────────────
+
+  Rename columns in HHA.ServiceCodes:
+    ServiceCode   →  ProcedureCode     NVARCHAR(10)  (HCPCS format e.g. W7060)
+
+  The ProcedureCode is now the PK of this table.
+  All FKs in HHA.Visits referencing ServiceCode → update to ProcedureCode.
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 5 — Add HHA.Providers table updates (sql/schema.sql)
+────────────────────────────────────────────────────────────────────────────
+
+  Rename columns in HHA.Providers:
+    ProviderId    →  AgencyTaxId       NVARCHAR(20)  (EIN: XX-XXXXXXX)
+
+  ADD new columns to HHA.Providers:
+    NPI           NVARCHAR(10)   NULL
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 6 — Add HHA.PayerCodes lookup table (sql/schema.sql)
+────────────────────────────────────────────────────────────────────────────
+
+  CREATE TABLE HHA.PayerCodes (
+    PayerId       NVARCHAR(10)   NOT NULL,
+    PayerName     NVARCHAR(200)  NOT NULL,
+    CONSTRAINT PK_PayerCodes PRIMARY KEY (PayerId)
+  )
+
+  Seed with PA payer codes in seed.sql:
+    ('17470', 'AmeriHealth Caritas PA')
+    ('28242', 'UPMC Home Health')
+    ('11302', 'Keystone First Community HealthChoices')
+    ('25133', 'Pennsylvania Health & Wellness')
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 7 — Update validation in src/routes/evv-api.js
+────────────────────────────────────────────────────────────────────────────
+
+  REMOVE these validations (wrong format):
+    - "providerId must start with PROV-"
+    - "caregiverId must start with CAREGIVER-"
+    - "patientId must start with PATIENT-"
+    - "serviceCode must be 3-digit number"
+
+  REPLACE with these validations:
+
+  AgencyTaxId (was providerId):
+    - Required
+    - Must match EIN regex: /^\d{2}-\d{7}$/
+    - Error if not found in HHA.Providers.AgencyTaxId
+
+  CaregiverCode (was caregiverId):
+    - Required
+    - Alphanumeric string, 1-50 chars
+    - Must exist in HHA.Caregivers.CaregiverCode
+    - Error code: CAREGIVER_NOT_FOUND (new)
+
+  MedicaidNumber (was patientId):
+    - Required
+    - Alphanumeric string, 1-20 chars
+    - Must exist in HHA.Patients.MedicaidNumber
+    - Error code: PATIENT_NOT_FOUND (new)
+
+  ProcedureCode (was serviceCode):
+    - Required
+    - Must match HCPCS regex: /^[A-Z]\d{4}$|^[A-Z]\d{3}[A-Z]$|^[A-Z0-9]{5}$/
+    - Simplified: accept any 5-character alphanumeric string (uppercase)
+    - Must exist in HHA.ServiceCodes.ProcedureCode
+    - Error code: INVALID_PROCEDURE_CODE (renamed from INVALID_SERVICE_CODE)
+
+  ClockInDatetime (was startTime):
+    - Required
+    - ISO 8601 UTC datetime string: YYYY-MM-DDTHH:MM:SSZ
+    - Must not be in future
+    - Error code: INVALID_CLOCK_IN_DATETIME (new)
+
+  ClockOutDatetime (was endTime):
+    - Situational (required if ClockInDatetime is provided)
+    - ISO 8601 UTC datetime string: YYYY-MM-DDTHH:MM:SSZ
+    - Must be after ClockInDatetime
+    - Error code: INVALID_CLOCK_OUT_DATETIME (new)
+
+  ScheduleDate (was visitDate):
+    - Required
+    - YYYY-MM-DD format
+    - Must not be in future
+    - Keep same validation
+
+  PayerId:
+    - Required
+    - Must exist in HHA.PayerCodes.PayerId
+    - Error code: INVALID_PAYER_ID (new)
+
+  ExternalEVVMSID (optional, caller-supplied):
+    - If provided, must start with ~ tilde character
+    - Remaining chars: alphanumeric + dashes/underscores only
+    - Max length: 64 chars (excluding ~)
+    - Must be unique (filtered unique index)
+    - Error code: DUPLICATE_EVVMSID (new)
+
+  Overnight visit detection (add warning, not hard rejection for simulator):
+    - If ClockInDatetime.date != ClockOutDatetime.date
+    - Return 400 with error code: VISIT_CROSSES_MIDNIGHT
+    - Message: "Visit crosses midnight. Split into two records per PA EVV rules."
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 8 — Add Caregiver API endpoint in src/routes/caregiver-api.js (NEW FILE)
+────────────────────────────────────────────────────────────────────────────
+
+  This endpoint does not currently exist in the simulator.
+  The real HHAeXchange API requires caregivers to be registered
+  before visit records can reference them.
+
+  POST /api/caregivers
+    Body:
+      agencyTaxId     string  required  EIN format XX-XXXXXXX
+      caregiverCode   string  required  Registry ID or last-5 SSN
+      firstName       string  required
+      lastName        string  required
+      caregiverType   string  required  RN / LPN / HHA
+      ssn             string  optional  last 5 digits
+      npi             string  optional  10-digit NPI
+    Returns: 201 with caregiver object
+    Errors: 400 MISSING_REQUIRED_FIELD, 409 DUPLICATE_CAREGIVER
+
+  GET /api/caregivers
+    Query params: agencyTaxId, caregiverCode, status
+    Returns: 200 with array of caregivers + count
+
+  GET /api/caregivers/:caregiverCode
+    Returns: 200 with caregiver object
+    Errors: 404 CAREGIVER_NOT_FOUND
+
+  PUT /api/caregivers/:caregiverCode
+    Body: any caregiver fields to update
+    Returns: 200 with updated caregiver
+    Errors: 404 CAREGIVER_NOT_FOUND
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 9 — Update visit POST response in src/routes/evv-api.js
+────────────────────────────────────────────────────────────────────────────
+
+  After a successful visit submission, the response must include EVVMSID.
+
+  Current response shape does not include EVVMSID.
+
+  Updated visit object shape (returned by all EVV endpoints):
+  {
+    "evvmsid":          "~VIS-000123"   (if caller provided ExternalEVVMSID)
+                    OR  "HHAX-XXXXXXXX" (simulator-generated if not provided)
+    "transactionId":    "TXN-20260310-00042",
+    "agencyTaxId":      "23-1234567",
+    "caregiverCode":    "12345",
+    "medicaidNumber":   "600012345",
+    "procedureCode":    "W7060",
+    "payerId":          "17470",
+    "scheduleDate":     "2026-03-10",
+    "scheduleStartTime": "2026-03-10T09:00:00Z",
+    "scheduleEndTime":   "2026-03-10T10:30:00Z",
+    "clockInDatetime":   "2026-03-10T09:02:00Z",
+    "clockOutDatetime":  "2026-03-10T10:28:00Z",
+    "clockInServiceLocationType":    "Home",
+    "clockInServiceLocationAddress": "123 Main St, Philadelphia, PA 19103",
+    "clockOutServiceLocationType":   "Home",
+    "clockOutServiceLocationAddress":"123 Main St, Philadelphia, PA 19103",
+    "dutyCodes":        ["115", "120"],
+    "missedVisit":      false,
+    "status":           "submitted" | "approved",
+    "submittedAt":      "2026-03-10T14:00:00.000Z",
+    "approvedAt":       null,
+    "lastModified":     "2026-03-10T14:00:00.000Z"
+  }
+
+  Store EVVMSID in HHA.Visits.EVVMSID column.
+  Return it in all GET responses for that visit.
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 10 — Add OAuth 2.0 simulation endpoint in server.js
+────────────────────────────────────────────────────────────────────────────
+
+  Add a simulated token endpoint so that the SeriqCare backend can be coded
+  to authenticate before submitting (matching the real HHAeXchange flow).
+
+  POST /identity/connect/token
+    Body (application/x-www-form-urlencoded):
+      grant_type    = "client_credentials"
+      client_id     = any string (simulator accepts any)
+      client_secret = any string (simulator accepts any)
+      scope         = any string
+    Returns:
+    {
+      "access_token": "sim-token-{random}",
+      "token_type":   "Bearer",
+      "expires_in":   1800
+    }
+
+  All /api/* routes should check for Authorization: Bearer {token} header.
+  In simulate mode: accept any bearer token (no real validation).
+  Log a warning if Authorization header is missing.
+
+  Add middleware in server.js:
+    function requireBearerToken(req, res, next) {
+      const auth = req.headers['authorization'] || '';
+      if (!auth.startsWith('Bearer ')) {
+        return res.status(401).json({
+          success: false,
+          code: 'Unauthorized',
+          httpCode: 401,
+          message: 'Missing or invalid Authorization header. Use Bearer token.',
+          timestamp: new Date().toISOString()
+        });
+      }
+      next();
+    }
+    Apply to: router.use(requireBearerToken) in evv-api.js and claims-api.js
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 11 — Update error-codes.js with new PA-specific error codes
+────────────────────────────────────────────────────────────────────────────
+
+  ADD these new error codes:
+
+  400  INVALID_PROCEDURE_CODE       Procedure code is not a valid HCPCS code
+  400  INVALID_CLOCK_IN_DATETIME    Clock-in datetime format invalid or in future
+  400  INVALID_CLOCK_OUT_DATETIME   Clock-out datetime invalid or before clock-in
+  400  INVALID_PAYER_ID             Payer ID not recognized
+  400  INVALID_AGENCY_TAX_ID        Agency Tax ID not in EIN format XX-XXXXXXX
+  400  VISIT_CROSSES_MIDNIGHT       Visit spans midnight — must be split per PA rules
+  404  CAREGIVER_NOT_FOUND          CaregiverCode not found in system
+  404  PATIENT_NOT_FOUND            MedicaidNumber not found in system
+  409  DUPLICATE_EVVMSID            ExternalEVVMSID already exists in system
+  409  DUPLICATE_CAREGIVER          CaregiverCode already registered
+
+  RENAME these existing error codes:
+    INVALID_CAREGIVER_ID  →  CAREGIVER_NOT_FOUND  (was 400, stays 404)
+    INVALID_PATIENT_ID    →  PATIENT_NOT_FOUND    (was 400, stays 404)
+    INVALID_SERVICE_CODE  →  INVALID_PROCEDURE_CODE
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 12 — Update seed data in sql/seed.sql
+────────────────────────────────────────────────────────────────────────────
+
+  HHA.Providers — use EIN format for primary key:
+    OLD: INSERT ('PROV-PA-2024-001', ...)
+    NEW: INSERT ('23-1234567', 'SeriqCare Demo Agency', NULL, 'PA', 'active', ...)
+
+  HHA.Caregivers — use realistic CaregiverCode:
+    OLD: INSERT ('CAREGIVER-001', 'John Smith', 'RN', 'PROV-PA-2024-001', ...)
+    NEW: INSERT ('23-1234567', 'REG-DCW-00001', 'John', 'Smith', 'RN', NULL, NULL, ...)
+         (AgencyTaxId, CaregiverCode, FirstName, LastName, CaregiverType, SSN, NPI)
+    Use codes:
+      REG-DCW-00001 (or a 5-digit SSN suffix like 12345 for caregivers without Registry ID)
+
+  HHA.Patients — use realistic MedicaidNumber:
+    OLD: INSERT ('PATIENT-001', 'Jane Doe', ...)
+    NEW: INSERT ('600012345', 'Jane', 'Doe', '1985-04-15', '23-1234567', 'active', ...)
+         (MedicaidNumber, FirstName, LastName, DateOfBirth, AgencyTaxId, Status)
+    Use PA-style Medicaid IDs: 9-character alphanumeric starting with 6
+
+  HHA.ServiceCodes — use HCPCS codes as PK:
+    OLD: INSERT ('101', 'Personal Care', 60, ...)
+    NEW: INSERT ('W7060', 'Personal Care - PA ODP', 60, ...)
+    Use real PA HCPCS codes:
+      W7060 = Personal Care
+      T1019 = Personal Care Services
+      S5125 = Attendant Care
+      H2015 = Comprehensive Community Support
+      W9802 = Residential Habilitation
+      W7055 = Companion/Attendant Services
+      T2025 = Waiver Services
+
+  HHA.Visits — update seed visits to use new field names and formats:
+    Use ISO 8601 UTC datetimes instead of date + HH:MM strings
+    Include PayerId values
+    Use real EIN, CaregiverCode, MedicaidNumber, ProcedureCode values
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 13 — Update src/repositories/evv-repository.js
+────────────────────────────────────────────────────────────────────────────
+
+  Update all SQL queries to use new column names:
+    ProviderId  → AgencyTaxId
+    CaregiverId → CaregiverCode
+    PatientId   → MedicaidNumber
+    ServiceCode → ProcedureCode
+    StartTime   → ClockInDatetime
+    EndTime     → ClockOutDatetime
+
+  Update mapVisit() function to map new column names to camelCase response:
+    agencyTaxId, caregiverCode, medicaidNumber, procedureCode,
+    clockInDatetime, clockOutDatetime, scheduleDate, payerId,
+    clockInServiceLocationType, clockInServiceLocationAddress,
+    clockOutServiceLocationType, clockOutServiceLocationAddress,
+    dutyCodes (split pipe-separated string to array),
+    missedVisit, evvmsid, externalEvvmsid
+
+  Update findDuplicateVisit() — old check was on
+    (ProviderId, CaregiverId, PatientId, VisitDate, StartTime, EndTime)
+  New check: on ExternalEVVMSID uniqueness (if provided)
+    and on (AgencyTaxId, CaregiverCode, MedicaidNumber, ClockInDatetime)
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 14 — Update src/utils/ids.js
+────────────────────────────────────────────────────────────────────────────
+
+  Add new ID generator for EVVMSID (HHAeXchange-assigned):
+    createEvvmsid() → "HHAX-" + 9 uppercase alphanumeric chars
+    Example: HHAX-A3K7PQ2X1
+
+  Keep existing:
+    createVisitId()  → VIS-XXXXXXXXX  (internal DB ID)
+    createClaimId()  → CLM-XXXXXXXXX  (internal DB ID)
+
+
+────────────────────────────────────────────────────────────────────────────
+  FIX 15 — Update integration-examples.js and examples.sh
+────────────────────────────────────────────────────────────────────────────
+
+  Update all curl/JS examples to use new field names and formats.
+
+  Updated curl example for visit submission:
+
+  # Step 1: Get bearer token
+  curl -X POST http://localhost:3000/identity/connect/token \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "grant_type=client_credentials&client_id=seriqcare-dev&client_secret=dev-secret&scope=evv"
+
+  # Step 2: Submit caregiver (if not already registered)
+  curl -X POST http://localhost:3000/api/caregivers \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer sim-token-abc123" \
+    -d '{
+      "agencyTaxId": "23-1234567",
+      "caregiverCode": "REG-DCW-00001",
+      "firstName": "John",
+      "lastName": "Smith",
+      "caregiverType": "HHA"
+    }'
+
+  # Step 3: Submit EVV visit
+  curl -X POST http://localhost:3000/api/evv/visits \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer sim-token-abc123" \
+    -d '{
+      "agencyTaxId": "23-1234567",
+      "caregiverCode": "REG-DCW-00001",
+      "medicaidNumber": "600012345",
+      "procedureCode": "W7060",
+      "payerId": "17470",
+      "scheduleDate": "2026-03-10",
+      "scheduleStartTime": "2026-03-10T09:00:00Z",
+      "scheduleEndTime": "2026-03-10T10:30:00Z",
+      "clockInDatetime": "2026-03-10T09:02:00Z",
+      "clockOutDatetime": "2026-03-10T10:28:00Z",
+      "clockInServiceLocationType": "Home",
+      "clockInServiceLocationAddress": "123 Main St, Philadelphia, PA 19103",
+      "clockOutServiceLocationType": "Home",
+      "clockOutServiceLocationAddress": "123 Main St, Philadelphia, PA 19103",
+      "dutyCodes": ["115", "120"],
+      "externalEvvmsid": "~VIS-000001"
+    }'
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 5 — SERIQCARE BACKEND CHANGES NEEDED (backend/services/hhax.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  After the simulator is fixed, the SeriqCare backend needs a new hhax.py
+  service (mirroring sandata.py) that:
+
+  ENV VARS TO ADD to .env:
+    HHAX_MODE=simulate          (simulate | live)
+    HHAX_API_URL=https://hhaexchange-api.onrender.com
+    HHAX_CLIENT_ID=seriqcare-dev
+    HHAX_CLIENT_SECRET=dev-secret
+    HHAX_SCOPE=evv
+    HHAX_TIMEOUT=30
+
+  FIELD MAPPING (SeriqCare DB → HHAeXchange API):
+    care.agencies.state_provider_id     → agencyTaxId        (EIN)
+    care.employees.employee_code        → caregiverCode
+    care.clients.medicaid_id            → medicaidNumber
+    care.service_codes.hcpcs_code       → procedureCode
+    care.schedules.scheduled_start      → scheduleStartTime  (UTC ISO 8601)
+    care.schedules.scheduled_end        → scheduleEndTime    (UTC ISO 8601)
+    care.visit_evv.call_in_datetime     → clockInDatetime    (UTC ISO 8601)
+    care.visit_evv.call_out_datetime    → clockOutDatetime   (UTC ISO 8601)
+    care.clients address fields         → clockIn/OutServiceLocationAddress
+    "Home" (default)                    → clockIn/OutServiceLocationType
+    care.visits.id formatted as ~VIS-{id:06d} → externalEvvmsid
+
+  RESPONSE HANDLING:
+    Store response EVVMSID in:
+      care.visit_integration_status.hhax_visit_id
+    Store TransactionId in:
+      care.aggregator_submissions.response_code
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECTION 6 — SUMMARY: WHAT THE SIMULATOR IS vs WHAT IT SHOULD BE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The current simulator was built with fictional simplified IDs ("PROV-",
+  "CAREGIVER-", "PATIENT-", 3-digit service codes) that do not match the
+  real Pennsylvania HHAeXchange field formats.
+
+  The real PA HHAeXchange spec requires:
+    - Agency identified by EIN (Tax ID), not a custom prefix
+    - Caregivers identified by Direct Care Worker Registry ID or SSN-5
+    - Clients identified by PA Medicaid Number
+    - Service codes as full HCPCS procedure codes (5-char alphanumeric)
+    - OAuth 2.0 bearer token authentication on every request
+    - Caregiver record must be registered before visit record
+    - Full ISO 8601 UTC datetimes for all timestamps
+    - EVVMSID returned by HHAeXchange after each accepted visit
+    - External EVVMSID prefixed with ~ tilde character
+    - Overnight visits must be split at midnight
+
+  After applying all fixes above, the simulator will:
+    1. Accept the same field names and formats as real HHAeXchange PA
+    2. Validate using real business rules (EIN format, HCPCS codes, etc.)
+    3. Require (simulated) OAuth authentication
+    4. Enforce caregiver-first submission order
+    5. Return EVVMSID values that SeriqCare can store and use for updates
+    6. Allow SeriqCare backend hhax.py to be written once and work for
+       both the simulator (HHAX_MODE=simulate) and production (HHAX_MODE=live)
+       with zero code changes
+
+================================================================================
+  END OF DOCUMENT
+================================================================================

@@ -1,0 +1,576 @@
+PA SANDATA ODP EVV SIMULATOR — IMPLEMENTATION DETAILS
+======================================================
+
+Purpose
+-------
+This simulator implements PA Sandata Alternate EVV workflow for ODP payloads
+with the required processing sequence:
+
+1. Client payloads
+2. Employee payloads
+3. Visit payloads
+
+Claims processing has been fully removed from server routes, repository logic,
+schema usage, seed data, docs, and test flow.
+
+Architecture
+------------
+- Runtime: Node.js + Express
+- Database: SQL Server (`SANDATA` schema)
+- Entry point: `server.js`
+- Route layer: `src/routes/evv-api.js`
+- Repository layer: `src/repositories/evv-repository.js`
+- Config layer: `src/config/env.js`
+
+Environment Modes
+-----------------
+Runtime mode is controlled by `ENV` in `.env`:
+
+- `ENV=local`
+	- SQL authentication mode
+	- Variables: `DB_SERVER_LOCAL`, `DB_PORT_LOCAL`, `DB_NAME_LOCAL`, `DB_USER_LOCAL`, `DB_PASSWORD_LOCAL`
+
+- `ENV=production`
+	- Azure SQL + Azure AD service principal mode
+	- Variables: `DB_SERVER`, `DB_PORT`, `DB_NAME`, `DB_CLIENT_ID`, `DB_CLIENT_SECRET`, `DB_TENANT_ID`
+
+Data Model
+----------
+Tables created by `sql/schema.sql`:
+
+- `SANDATA.sandata_clients`
+- `SANDATA.sandata_employees`
+- `SANDATA.sandata_visits`
+- `SANDATA.sandata_submission_log`
+- `SANDATA.sandata_response_log`
+
+Repository Behavior
+-------------------
+`src/repositories/evv-repository.js` provides:
+
+- Upsert-style persistence for client/employee/visit entities
+- Reads by business keys:
+	- client: `ClientIdentifier`
+	- employee: `EmployeeIdentifier`
+	- visit: `VisitOtherId`
+- List endpoints for all entities
+- Submission/response audit log persistence and retrieval
+
+API Surface
+-----------
+Base URLs:
+
+- Local: `http://localhost:3002`
+- Production (Render): `https://seriqcare-sandata-simulator.onrender.com`
+
+Submission endpoints:
+
+- `POST /api/evv/clients`
+- `POST /api/evv/employees`
+- `POST /api/evv/visits`
+
+Query endpoints:
+
+- `GET /api/evv/clients/:clientIdentifier`
+- `GET /api/evv/employees/:employeeIdentifier`
+- `GET /api/evv/visits/:visitOtherId`
+- `GET /api/evv/clients`
+- `GET /api/evv/employees`
+- `GET /api/evv/visits`
+
+Audit endpoints:
+
+- `GET /api/evv/logs/submissions`
+- `GET /api/evv/logs/responses`
+
+Full URL examples (Local -> Production):
+
+- Submit clients
+	- `POST http://localhost:3002/api/evv/clients`
+	- `POST https://seriqcare-sandata-simulator.onrender.com/api/evv/clients`
+- Submit employees
+	- `POST http://localhost:3002/api/evv/employees`
+	- `POST https://seriqcare-sandata-simulator.onrender.com/api/evv/employees`
+- Submit visits
+	- `POST http://localhost:3002/api/evv/visits`
+	- `POST https://seriqcare-sandata-simulator.onrender.com/api/evv/visits`
+- Get client by identifier
+	- `GET http://localhost:3002/api/evv/clients/:clientIdentifier`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/clients/:clientIdentifier`
+- Get employee by identifier
+	- `GET http://localhost:3002/api/evv/employees/:employeeIdentifier`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/employees/:employeeIdentifier`
+- Get visit by external ID
+	- `GET http://localhost:3002/api/evv/visits/:visitOtherId`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/visits/:visitOtherId`
+- List clients
+	- `GET http://localhost:3002/api/evv/clients`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/clients`
+- List employees
+	- `GET http://localhost:3002/api/evv/employees`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/employees`
+- List visits
+	- `GET http://localhost:3002/api/evv/visits`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/visits`
+- Get submission log
+	- `GET http://localhost:3002/api/evv/logs/submissions`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/logs/submissions`
+- Get response log
+	- `GET http://localhost:3002/api/evv/logs/responses`
+	- `GET https://seriqcare-sandata-simulator.onrender.com/api/evv/logs/responses`
+
+Submission Response Contract
+----------------------------
+Submission endpoints return Sandata-style record processing summaries:
+
+- `Status`: `SUCCESS` or `FAILED`
+- `Message`: contextual processing message
+- `RecordCount`: number of processed records
+- `Records`: per-record status array
+	- `SequenceID`
+	- `RecordStatus` (`SUCCESS` or `FAILED`)
+	- `RecordError` (includes validation text and ESC code on failure)
+
+Single and bulk payloads are both supported, and bulk submissions can produce mixed
+success/failure `Records` in one response.
+
+Validation and ESC Logic
+------------------------
+Validation is applied per record for client, employee, and visit payloads.
+Failures are returned as per-record `RecordError` values including ESC codes.
+
+Implemented ESC mappings:
+
+- `ESC-601` Missing Call-In or Call-Out
+- `ESC-602` Visit duration is zero or negative
+- `ESC-603` Invalid or unmapped Procedure Code/Modifier
+- `ESC-604` Client not found in DHS Aggregator (dependency check)
+- `ESC-605` Employee not found in DHS Aggregator (dependency check)
+- `ESC-606` Visit outside authorized service window (internal processing fallback)
+- `ESC-607` Invalid Payer or Program for PA ODP
+- `ESC-609` Invalid Employee PIN
+- `ESC-611` Missing Reason Code for manual edits
+
+Examples of implemented rule checks:
+
+- Client
+	- `ClientQualifier` must be `ClientCustomID`
+	- `ClientIdentifier` and `ClientMedicaidID` must be 10 digits
+	- `PayerID=PAODP`, `PayerProgram=ODP`
+
+- Employee
+	- `EmployeeQualifier` must be `EmployeeCustomID`
+	- `EmployeeSSN` must match `0000#####` pattern
+	- PA-disallowed employee fields are rejected
+
+- Visit
+	- Requires existing client and employee records before acceptance
+	- Manual/no-call visits require adjusted in/out timestamps
+	- Call segments enforce call-type requirements
+	- Visit changes enforce reason code requirements
+
+
+----------------------------------------------------------------------
+1) CLIENT SCHEMA
+----------------------------------------------------------------------
+Client General Fields
+---------------------
+- ClientQualifier: required, must be "ClientCustomID"
+- ClientIdentifier: required, 10-digit Medicaid ID
+- ClientFirstName: required, max 30
+- ClientMiddleInitial: optional, max 1
+- ClientLastName: required, max 30
+- ClientMedicaidID: required, 10-digit Medicaid ID
+- MissingMedicaidID: optional, usually "false"
+- SequenceID: required integer, commonly YYYYMMDDHHMMSS
+- ClientOtherID: optional vendor-side client key
+- ClientTimeZone: required, e.g. "US/Eastern"
+- ClientCustomID: required, should match ClientIdentifier
+- ClientSSN: conditional
+
+| Column Name             | Type                  | Required       | Description                                   | Rules / Notes                                        | Example            |
+| ----------------------- | --------------------- | -------------- | --------------------------------------------- | ---------------------------------------------------- | ------------------ |
+| **ProviderQualifier**   | string                | ✅ Yes          | Identifies the type of provider ID being sent | Must be either `"MedicaidID"` or `"NPI"`             | `"MedicaidID"`     |
+| **ProviderID**          | string                | ✅ Yes          | Unique identifier for the provider (agency)   | If MedicaidID → usually 9 digits; if NPI → 10 digits | `"123456789"`      |
+| **ClientQualifier**     | string                | ✅ Yes          | Defines the type of client identifier         | Must be `"ClientCustomID"`                           | `"ClientCustomID"` |
+| **ClientIdentifier**    | string                | ✅ Yes          | Primary unique identifier for the client      | For PA, this is the **10-digit Medicaid ID**         | `"1234567890"`     |
+| **ClientFirstName**     | string                | ✅ Yes          | Client first name                             | Max length = 30                                      | `"John"`           |
+| **ClientMiddleInitial** | string                | ❌ Optional     | Client middle initial                         | Max length = 1                                       | `"A"`              |
+| **ClientLastName**      | string                | ✅ Yes          | Client last name                              | Max length = 30                                      | `"Doe"`            |
+| **ClientMedicaidID**    | string                | ✅ Yes          | Medicaid identifier for the client            | Must be the same 10-digit Medicaid ID                | `"1234567890"`     |
+| **MissingMedicaidID**   | string / boolean-like | ❌ Optional     | Indicates whether Medicaid ID is unavailable  | Usually `"false"`                                    | `"false"`          |
+| **SequenceID**          | integer               | ✅ Yes          | Version identifier for the record             | Common format: `YYYYMMDDHHMMSS`                      | `20260326123045`   |
+| **ClientOtherID**       | string                | ❌ Optional     | Vendor-side client identifier                 | Internal app/client ID                               | `"CLI-10001"`      |
+| **ClientTimeZone**      | string                | ✅ Yes          | Time zone for the client record               | Usually `"US/Eastern"` for PA                        | `"US/Eastern"`     |
+| **ClientCustomID**      | string                | ✅ Yes          | Client custom identifier                      | Should match `ClientIdentifier`                      | `"1234567890"`     |
+| **ClientSSN**           | string                | ⚠️ Conditional | Client SSN if required by workflow            | Only send if applicable                              | `"123456789"`      |
+
+
+Client Address Fields
+---------------------
+- ClientAddressType: required, Home / Business / Other
+- ClientAddressIsPrimary: required, "true" or "false"
+- ClientAddressLine1: required
+- ClientAddressLine2: optional
+- ClientCounty: optional
+- ClientCity: required
+- ClientState: required, 2-character state
+- ClientZip: required, 9-digit ZIP
+
+Note:
+- Do not provide ClientAddressLatitude / ClientAddressLongitude for PA.
+
+| Column Name                | Type                  | Required   | Description                                   | Rules / Notes                                      | Example         |
+| -------------------------- | --------------------- | ---------- | --------------------------------------------- | -------------------------------------------------- | --------------- |
+| **ClientAddressType**      | string                | ✅ Yes      | Type of address                               | Allowed values include `Home`, `Business`, `Other` | `"Home"`        |
+| **ClientAddressIsPrimary** | string / boolean-like | ✅ Yes      | Indicates whether this is the primary address | `"true"` or `"false"`                              | `"true"`        |
+| **ClientAddressLine1**     | string                | ✅ Yes      | Primary street address                        | Required                                           | `"123 Main St"` |
+| **ClientAddressLine2**     | string                | ❌ Optional | Additional address info                       | Apartment/unit/suite                               | `"Apt 2"`       |
+| **ClientCounty**           | string                | ❌ Optional | County name                                   | Optional                                           | `"Dauphin"`     |
+| **ClientCity**             | string                | ✅ Yes      | City name                                     | Required                                           | `"Harrisburg"`  |
+| **ClientState**            | string                | ✅ Yes      | State abbreviation                            | 2-character code                                   | `"PA"`          |
+| **ClientZip**              | string                | ✅ Yes      | Postal code                                   | Typically 9-digit ZIP                              | `"171011234"`   |
+
+Client Payer Fields
+-------------------
+- PayerID: required, use PAODP for ODP
+- PayerProgram: required, use ODP
+- ProcedureCode: required
+- Modifier1-Modifier4: conditional, follow PA appendix ordering
+- Use "NULL" when modifier slots are required but empty
+
+| Column Name       | Type   | Required       | Description             | Rules / Notes                       | Example   |
+| ----------------- | ------ | -------------- | ----------------------- | ----------------------------------- | --------- |
+| **PayerID**       | string | ✅ Yes          | Payer identifier        | For PA ODP use `PAODP`              | `"PAODP"` |
+| **PayerProgram**  | string | ✅ Yes          | Program identifier      | For PA ODP use `ODP`                | `"ODP"`   |
+| **ProcedureCode** | string | ✅ Yes          | Service / HCPCS code    | Must match PA-approved service code | `"T1019"` |
+| **Modifier1**     | string | ⚠️ Conditional | First billing modifier  | Use PA-required order               | `"U4"`    |
+| **Modifier2**     | string | ⚠️ Conditional | Second billing modifier | Use PA-required order               | `"U1"`    |
+| **Modifier3**     | string | ⚠️ Conditional | Third billing modifier  | Use `"NULL"` if needed but empty    | `"NULL"`  |
+| **Modifier4**     | string | ⚠️ Conditional | Fourth billing modifier | Use `"NULL"` if needed but empty    | `"NULL"`  |
+
+Client Phone Fields
+-------------------
+- ClientPhoneType: required when phone segment is sent
+- ClientPhone: required when phone segment is sent
+- Phone is required if available
+
+| Column Name         | Type   | Required       | Description          | Rules / Notes                         | Example        |
+| ------------------- | ------ | -------------- | -------------------- | ------------------------------------- | -------------- |
+| **ClientPhoneType** | string | ⚠️ Conditional | Type of phone number | `Home`, `Mobile`, `Business`, `Other` | `"Mobile"`     |
+| **ClientPhone**     | string | ⚠️ Conditional | Client phone number  | 10 digits when sent                   | `"7175551234"` |
+
+----------------------------------------------------------------------
+2) EMPLOYEE SCHEMA
+----------------------------------------------------------------------
+Employee Fields
+---------------
+- ProviderQualifier: required, MedicaidID or NPI
+- ProviderID: required
+- EmployeeQualifier: required, must be "EmployeeCustomID"
+- EmployeeIdentifier: required, must match Visit payload exactly
+- EmployeeOtherID: optional vendor employee ID
+- SequenceID: required integer
+- EmployeeSSN: required, last 5 digits of SSN with 4 leading zeros (0000#####)
+- EmployeeLastName: required, max 30
+- EmployeeFirstName: required, max 30
+- EmployeeEmail: conditional
+
+
+Employee Identifier Notes
+-------------------------
+- EmployeeIdentifier must remain consistent across Employee and Visit records.
+- PA may allow a PA-DHS registry identifier or a vendor-based prefixed ID format.
+- Avoid changing identifier logic once production records exist.
+
+| Column Name            | Type    | Required       | Description                                            | Rules / Notes                                                                                              | Example                      |
+| ---------------------- | ------- | -------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| **ProviderQualifier**  | string  | ✅ Yes          | Identifies the type of provider ID being sent          | Must be either `"MedicaidID"` or `"NPI"`                                                                   | `"MedicaidID"`               |
+| **ProviderID**         | string  | ✅ Yes          | Unique identifier for the provider (agency)            | - If MedicaidID → 9 digits<br>- If NPI → 10 digits                                                         | `"123456789"`                |
+| **EmployeeQualifier**  | string  | ✅ Yes          | Defines the type of employee identifier                | Must always be `"EmployeeCustomID"` for PA                                                                 | `"EmployeeCustomID"`         |
+| **EmployeeIdentifier** | string  | ✅ Yes          | Primary unique identifier for the employee (caregiver) | Must match exactly in **Visit payload**<br>Must be stable across all submissions                           | `"AB1234567"`                |
+| **EmployeeOtherID**    | string  | ❌ Optional     | Vendor-specific employee ID                            | Internal system ID (recommended for mapping)                                                               | `"EMP-000123"`               |
+| **SequenceID**         | integer | ✅ Yes          | Version identifier for the record                      | Must be unique per submission<br>Used for updates (increment on change)<br>Common format: `YYYYMMDDHHMMSS` | `20260326123100`             |
+| **EmployeeSSN**        | string  | ✅ Yes          | Masked Social Security Number                          | Format: last 5 digits with leading zeros → `0000#####`<br>Total length = 9                                 | `"000012345"`                |
+| **EmployeeLastName**   | string  | ✅ Yes          | Employee’s last name                                   | Max length = 30 characters                                                                                 | `"Smith"`                    |
+| **EmployeeFirstName**  | string  | ✅ Yes          | Employee’s first name                                  | Max length = 30 characters                                                                                 | `"Jane"`                     |
+| **EmployeeEmail**      | string  | ⚠️ Conditional | Employee email address                                 | Required only if used by agency/workflow<br>Must be valid email format                                     | `"jane.smith@seriqcare.com"` |
+
+
+----------------------------------------------------------------------
+3) VISIT SCHEMA
+----------------------------------------------------------------------
+Visit General Fields
+--------------------
+- VisitOtherID: required, external visit ID
+- SequenceID: required, new value for each correction/update
+- EmployeeQualifier: required, "EmployeeCustomID"
+- EmployeeOtherID: optional
+- EmployeeIdentifier: required, must match employee record
+- GroupCode: optional
+- ClientIDQualifier: required, "ClientCustomID"
+- ClientIdentifier: required, 10-digit Medicaid ID
+- ClientID: required, 10-digit Medicaid ID
+- ClientOtherID: optional
+- VisitCancelledIndicator: required
+- PayerID: required, PAODP
+- PayerProgram: required, ODP
+- ProcedureCode: required
+- Modifier1-Modifier4: conditional
+- VisitTimeZone: required, e.g. US/Eastern
+- AdjInDateTime: optional, used for manual/adjusted entry
+- AdjOutDateTime: optional, used for manual/adjusted entry
+- BillVisit: required
+- Memo: optional
+- ClientVerifiedTimes: optional
+- ClientVerifiedTasks: optional
+- ClientVerifiedService: optional
+- ClientSignatureAvailable: optional
+- ClientVoiceRecording: optional
+
+| Column Name                  | Type                  | Required       | Description                            | Rules / Notes                           | Example                  |
+| ---------------------------- | --------------------- | -------------- | -------------------------------------- | --------------------------------------- | ------------------------ |
+| **VisitOtherID**             | string                | ✅ Yes          | Vendor/system visit ID                 | Must be unique and stable for the visit | `"VIS-30001"`            |
+| **SequenceID**               | integer               | ✅ Yes          | Version identifier for the visit       | Increase when correcting/resubmitting   | `20260326122001`         |
+| **EmployeeQualifier**        | string                | ✅ Yes          | Employee identifier type               | Must be `"EmployeeCustomID"`            | `"EmployeeCustomID"`     |
+| **EmployeeOtherID**          | string                | ❌ Optional     | Vendor-side employee ID                | Internal system employee ID             | `"EMP-20001"`            |
+| **EmployeeIdentifier**       | string                | ✅ Yes          | Unique caregiver identifier            | Must match Employee payload exactly     | `"AB1234567"`            |
+| **GroupCode**                | string                | ❌ Optional     | Group visit identifier                 | Used for grouped visits if applicable   | `null`                   |
+| **ClientIDQualifier**        | string                | ✅ Yes          | Client identifier type                 | Must be `"ClientCustomID"`              | `"ClientCustomID"`       |
+| **ClientIdentifier**         | string                | ✅ Yes          | Unique client identifier               | For PA, 10-digit Medicaid ID            | `"1234567890"`           |
+| **ClientID**                 | string                | ✅ Yes          | Client ID field                        | Usually same as ClientIdentifier        | `"1234567890"`           |
+| **ClientOtherID**            | string                | ❌ Optional     | Vendor-side client ID                  | Internal client ID                      | `"CLI-10001"`            |
+| **VisitCancelledIndicator**  | string / boolean-like | ✅ Yes          | Whether visit was cancelled            | `"true"` or `"false"`                   | `"false"`                |
+| **PayerID**                  | string                | ✅ Yes          | Payer identifier                       | For PA ODP use `PAODP`                  | `"PAODP"`                |
+| **PayerProgram**             | string                | ✅ Yes          | Program identifier                     | For PA ODP use `ODP`                    | `"ODP"`                  |
+| **ProcedureCode**            | string                | ✅ Yes          | Service / HCPCS code                   | Must match approved service code        | `"T1019"`                |
+| **Modifier1**                | string                | ⚠️ Conditional | First modifier                         | Use PA-required ordering                | `"U4"`                   |
+| **Modifier2**                | string                | ⚠️ Conditional | Second modifier                        | Use PA-required ordering                | `"U1"`                   |
+| **Modifier3**                | string                | ⚠️ Conditional | Third modifier                         | Use `"NULL"` if empty but slot needed   | `"NULL"`                 |
+| **Modifier4**                | string                | ⚠️ Conditional | Fourth modifier                        | Use `"NULL"` if empty but slot needed   | `"NULL"`                 |
+| **VisitTimeZone**            | string                | ✅ Yes          | Visit time zone                        | Usually `"US/Eastern"`                  | `"US/Eastern"`           |
+| **AdjInDateTime**            | datetime string       | ❌ Optional     | Adjusted/manual clock-in time          | Used for manual entry or corrections    | `"2026-03-26T13:00:00Z"` |
+| **AdjOutDateTime**           | datetime string       | ❌ Optional     | Adjusted/manual clock-out time         | Used for manual entry or corrections    | `"2026-03-26T15:00:00Z"` |
+| **BillVisit**                | string / boolean-like | ✅ Yes          | Whether the visit is billable          | `"true"` or `"false"`                   | `"true"`                 |
+| **Memo**                     | string                | ❌ Optional     | Notes about the visit                  | Optional free-text                      | `"Visit completed"`      |
+| **ClientVerifiedTimes**      | string / boolean-like | ❌ Optional     | Client verified the visit times        | `"true"` or `"false"`                   | `"true"`                 |
+| **ClientVerifiedTasks**      | string / boolean-like | ❌ Optional     | Client verified tasks performed        | `"true"` or `"false"`                   | `"false"`                |
+| **ClientVerifiedService**    | string / boolean-like | ❌ Optional     | Client verified the service provided   | `"true"` or `"false"`                   | `"true"`                 |
+| **ClientSignatureAvailable** | string / boolean-like | ❌ Optional     | Signature availability indicator       | `"true"` or `"false"`                   | `"false"`                |
+| **ClientVoiceRecording**     | string / boolean-like | ❌ Optional     | Voice recording availability indicator | `"true"` or `"false"`                   | `"false"`                |
+
+
+Calls Segment
+-------------
+- CallExternalID: required
+- CallDateTime: required, UTC timestamp
+- CallAssignment: required, Time In / Time Out
+- GroupCode: optional
+- CallType: required, Telephony / Mobile / FVV / Manual
+- ProcedureCode: required
+- ClientIdentifierOnCall: conditional
+- MobileLogin: required for Mobile
+- CallLatitude: required for Mobile and FVV
+- CallLongitude: required for Mobile and FVV
+- TelephonyPIN: required for Telephony
+- OriginatingPhoneNumber: required for Telephony
+- VisitLocationType: required, 1=Home, 2=Community
+
+Manual Visit Rule
+-----------------
+If Calls are not sent, adjusted times must be present in the VisitGeneralInformation
+segment. In that case, the visit is treated as manually entered.
+
+| Column Name                | Type            | Required       | Description                             | Rules / Notes                          | Example                  |
+| -------------------------- | --------------- | -------------- | --------------------------------------- | -------------------------------------- | ------------------------ |
+| **CallExternalID**         | string          | ✅ Yes          | Unique call record ID                   | Unique per time-in/time-out event      | `"CALL-IN-30001"`        |
+| **CallDateTime**           | datetime string | ✅ Yes          | Date and time of call event             | UTC timestamp format                   | `"2026-03-26T13:00:00Z"` |
+| **CallAssignment**         | string          | ✅ Yes          | Indicates in/out event                  | `"Time In"` or `"Time Out"`            | `"Time In"`              |
+| **GroupCode**              | string          | ❌ Optional     | Group code for grouped visit            | Optional                               | `null`                   |
+| **CallType**               | string          | ✅ Yes          | How the event was captured              | `Telephony`, `Mobile`, `FVV`, `Manual` | `"Mobile"`               |
+| **ProcedureCode**          | string          | ✅ Yes          | Service code tied to call               | Must match visit service               | `"T1019"`                |
+| **ClientIdentifierOnCall** | string          | ⚠️ Conditional | Client identifier recorded at call time | Required in some workflows             | `"1234567890"`           |
+| **MobileLogin**            | string          | ⚠️ Conditional | Mobile username/login used              | Required for `Mobile` call type        | `"caregiver_login"`      |
+| **CallLatitude**           | decimal         | ⚠️ Conditional | GPS latitude                            | Required for `Mobile` and `FVV`        | `40.27319123456789`      |
+| **CallLongitude**          | decimal         | ⚠️ Conditional | GPS longitude                           | Required for `Mobile` and `FVV`        | `-76.88670123456789`     |
+| **TelephonyPIN**           | string          | ⚠️ Conditional | Telephony PIN                           | Required for `Telephony`               | `"1234"`                 |
+| **OriginatingPhoneNumber** | string          | ⚠️ Conditional | Calling phone number                    | Required for `Telephony`               | `"7175551234"`           |
+| **VisitLocationType**      | string          | ✅ Yes          | Location category of visit              | `1=Home`, `2=Community`                | `"1"`                    |
+
+
+VisitChanges Segment
+--------------------
+- SequenceID: required
+- ChangeMadeBy: required
+- ChangeDateTime: required
+- GroupCode: optional
+- ReasonCode: required
+- ChangeReasonMemo: conditional
+
+| Column Name          | Type            | Required       | Description                       | Rules / Notes                          | Example                                      |
+| -------------------- | --------------- | -------------- | --------------------------------- | -------------------------------------- | -------------------------------------------- |
+| **SequenceID**       | integer/string  | ✅ Yes          | Sequence for the change event     | Should correspond to corrected version | `"20260326124500"`                           |
+| **ChangeMadeBy**     | string          | ✅ Yes          | User or process making the change | Username or system process ID          | `"system_user"`                              |
+| **ChangeDateTime**   | datetime string | ✅ Yes          | When the change was made          | UTC timestamp                          | `"2026-03-26T15:01:00Z"`                     |
+| **GroupCode**        | string          | ❌ Optional     | Group visit code                  | Optional                               | `null`                                       |
+| **ReasonCode**       | string          | ✅ Yes          | Code explaining change reason     | Must match approved reason code list   | `"XXXX"`                                     |
+| **ChangeReasonMemo** | string          | ⚠️ Conditional | Free-text reason detail           | Used when required by reason code      | `"Manual correction after missed clock-out"` |
+
+
+--------------------
+Sandata Responses
+--------------------
+Single‑Record Response Examples
+
+Single Client Response
+{
+  "Status": "SUCCESS",
+  "Message": "All records processed successfully",
+  "RecordCount": 1,
+  "Records": [
+    {
+      "SequenceID": "1001",
+      "RecordStatus": "SUCCESS",
+      "RecordError": ""
+    }
+  ]
+}
+
+
+Single Employee Response
+{
+  "Status": "FAILED",
+  "Message": "One or more records failed validation",
+  "RecordCount": 1,
+  "Records": [
+    {
+      "SequenceID": "2001",
+      "RecordStatus": "FAILED",
+      "RecordError": "EmployeePIN is missing or invalid"
+    }
+  ]
+}
+
+Single Visit Response
+{
+  "Status": "FAILED",
+  "Message": "Visit validation failed",
+  "RecordCount": 1,
+  "Records": [
+    {
+      "SequenceID": "3002",
+      "RecordStatus": "FAILED",
+      "RecordError": "Missing Call-In or Call-Out; ESC-601"
+    }
+  ]
+}
+
+Bulk‑Record Response Examples
+Bulk Client Response
+
+{
+  "Status": "FAILED",
+  "Message": "Some records failed validation",
+  "RecordCount": 2,
+  "Records": [
+    {
+      "SequenceID": "1001",
+      "RecordStatus": "SUCCESS",
+      "RecordError": ""
+    },
+    {
+      "SequenceID": "1002",
+      "RecordStatus": "FAILED",
+      "RecordError": "ClientMedicaidID is invalid"
+    }
+  ]
+}
+
+Bulk Employee Response
+{
+  "Status": "SUCCESS",
+  "Message": "All records processed successfully",
+  "RecordCount": 2,
+  "Records": [
+    {
+      "SequenceID": "2001",
+      "RecordStatus": "SUCCESS",
+      "RecordError": ""
+    },
+    {
+      "SequenceID": "2002",
+      "RecordStatus": "SUCCESS",
+      "RecordError": ""
+    }
+  ]
+}
+
+Bulk Visit Response
+{
+  "Status": "FAILED",
+  "Message": "Some visit records failed validation",
+  "RecordCount": 2,
+  "Records": [
+    {
+      "SequenceID": "3002",
+      "RecordStatus": "FAILED",
+      "RecordError": "Invalid ProcedureCode/Modifier combination; ESC-603"
+    },
+    {
+      "SequenceID": "3002",
+      "RecordStatus": "SUCCESS",
+      "RecordError": ""
+    }
+  ]
+}
+
+
+Database Setup and Seed Behavior
+--------------------------------
+Scripts:
+
+- `npm run db:setup` runs `sql/schema.sql` then `sql/seed.sql`
+- `npm run db:seed` runs `sql/seed.sql` only
+
+Current `sql/seed.sql` behavior:
+
+- Clears data before insert
+- Uses FK-safe reset order:
+	- `TRUNCATE`: response log, submission log, visits
+	- `DELETE`: employees, clients
+- Inserts baseline sample client, employee, and visit records
+
+Test Runner Behavior
+--------------------
+`client.js` is the end-to-end API test process.
+
+Scripts:
+
+- `npm run test:api`
+	- Non-strict mode by default
+	- Does not return non-zero exit code for record failures
+
+- `npm run test:api:strict`
+	- Strict mode
+	- Returns non-zero exit code on failures
+
+Additional safeguards in test runner:
+
+- Detects wrong target service via `/health` response
+- Aborts early if `BASE_URL` points to a different app
+- Truncates large string/HTML payload output to prevent terminal flooding
+
+Recommended invocation when multiple local apps are running:
+
+- `set BASE_URL=http://localhost:3002`
+- `npm run test:api`
+
+Current Project Scope
+---------------------
+This repository now represents an EVV-only PA ODP Sandata simulator with:
+
+- EVV submission and retrieval APIs
+- Sandata-style submission result envelopes
+- ESC-coded validation failures per record
+- Audit logging for outbound payloads and processed results
+- Local and production (service principal) environment support

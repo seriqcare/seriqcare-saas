@@ -1,0 +1,36 @@
+{
+  "name": "SeriqCare Clock",
+  "short_name": "SeriqCare",
+  "description": "SeriqCare caregiver clock in/out",
+  "start_url": "/clock",
+  "scope": "/clock",
+  "display": "standalone",
+  "background_color": "#e6e9ef",
+  "theme_color": "#2f6ea8",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

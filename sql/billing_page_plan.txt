@@ -1,0 +1,240 @@
+================================================================================
+SeriqCare Billing Page — Implementation Plan
+Date: 2026-03-20
+================================================================================
+
+OVERVIEW
+--------
+PA Medicaid billing for ODP Waiver (Sandata) and PDA/MA (HHAeXchange) services.
+Billing lifecycle:
+  Visit completed → EVV Verified → Approved → Claim generated → Submitted → Paid / Denied
+
+Route: /billing
+
+================================================================================
+DESIGN DECISIONS (locked for pilot)
+================================================================================
+
+1. BILLING RATE SOURCE
+   - Add nullable DEFAULT_RATE column to care.service_codes (DECIMAL(10,2) NULL).
+   - Pilot estimates: dollars = units * default_rate.
+   - Long-term: move to care.fee_schedule with optional authorization-level overrides.
+   - SQL: ALTER TABLE care.service_codes ADD default_rate DECIMAL(10,2) NULL;
+
+2. BILLING CLAIMS TABLE
+   - Create care.billing_claims via migration (minimal pilot header table).
+   - Schema (pilot):
+       id              INT IDENTITY PK
+       agency_id       INT FK → care.agencies
+       claim_date      DATE NOT NULL
+       payer           VARCHAR(50)   -- 'sandata' | 'hhax' | 'private'
+       status          VARCHAR(30)   -- Draft | Ready | Submitted | Paid | Denied | Voided
+       total_units     DECIMAL(10,2)
+       total_amount    DECIMAL(10,2)
+       created_at      DATETIME2 DEFAULT GETUTCDATE()
+       updated_at      DATETIME2 DEFAULT GETUTCDATE()
+   - Join table: care.billing_claim_visits (claim_id FK, visit_id FK, units, amount)
+
+3. "READY TO BILL" DEFINITION
+   Full rule:
+     - approval_status = 'Approved'
+     - visit_cancelled = 0
+     - evv_status IN ('Verified', 'Adjusted')
+     - approved_units > 0 OR billed_units > 0
+     - active authorization exists (care.service_authorizations.is_active = 1)
+     - service_date BETWEEN authorization start_date AND end_date
+     - submission_status is NOT 'Rejected' (i.e. vi.sandata_status != 'Rejected'
+       AND vi.hhax_status != 'Rejected')
+   MVP fallback (simpler):
+     - approval_status = 'Approved'
+     - evv_status IN ('Verified', 'Adjusted')
+
+4. UNITS vs DOLLARS
+   - Show both.
+   - Units: from visit_billing.approved_units (fallback: billed_units).
+   - Dollars: COALESCE(approved_units, billed_units) * sc.default_rate.
+   - Label as "Estimated" until fee_schedule is implemented.
+
+================================================================================
+PAGE LAYOUT — /billing
+================================================================================
+
+TOPBAR
+  Title:    "Billing"
+  Subtitle: "PA Medicaid · ODP Consolidated Waiver · PDA / MA · Pilot Estimates"
+  Actions:  [Period Select]  [Export]  [Generate Claims]
+
+KPI ROW (5 cards)
+  Billed This Month ($) | Pending Claims | Approved / Ready | Denials | Auth Util %
+
+MAIN GRID (1fr 290px)
+
+  LEFT COLUMN:
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ Claims Queue                                                    │
+  │ Tabs: [All][Ready to Bill][Submitted][Approved][Denied]         │
+  │                                                                 │
+  │ Visit ID | Date | Client | Service Code | Units | Est. Amount  │
+  │ EVV Status | Approval | Aggregator | [Generate Claim]           │
+  │                                                (paged, 20/pg)  │
+  └─────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ Billing History                                                 │
+  │ Claim ID | Date | Client | Units | Est. Amount | Payer | Status│
+  │ [View]                                                          │
+  └─────────────────────────────────────────────────────────────────┘
+
+  RIGHT SIDEBAR:
+  ┌───────────────────┐
+  │ This Month         │
+  │ Total Visits       │
+  │ Total Units        │
+  │ Est. Amount        │
+  │ Approved           │
+  └───────────────────┘
+  ┌───────────────────┐
+  │ Auth Utilization   │
+  │ (top 5 clients)    │
+  │ bar per client     │
+  └───────────────────┘
+  ┌───────────────────┐
+  │ Billing Alerts     │
+  │ Expiring auths     │
+  │ Denials            │
+  │ Unapproved visits  │
+  └───────────────────┘
+  ┌───────────────────┐
+  │ Quick Actions      │
+  │ → Visits           │
+  │ → EVV              │
+  │ → Timesheets       │
+  └───────────────────┘
+
+================================================================================
+PHASE BREAKDOWN
+================================================================================
+
+PHASE 1 — Billing Dashboard + Claims Queue  (IMPLEMENT NEXT)
+  New DB:
+    - ALTER TABLE care.service_codes ADD default_rate DECIMAL(10,2) NULL
+    - CREATE TABLE care.billing_claims (header)
+    - CREATE TABLE care.billing_claim_visits (line items)
+  New Backend:
+    - GET  /api/billing          → BillingEntry list (paginated, filterable)
+    - GET  /api/billing/stats    → KPI totals for current period
+    - POST /api/billing/generate → Create billing_claims rows from approved visits
+  New Frontend:
+    - app/billing/page.tsx       → Server component, reads searchParams
+    - components/billing-claims-panel.tsx → Client component (queue + history tabs)
+    - components/billing-generate-btn.tsx → Client component (generate action)
+    - lib/queries/billing.ts     → getbillingEntries(), getBillingStats()
+
+PHASE 2 — Authorization Utilization Tracker
+  New Backend:
+    - GET /api/billing/auth-utilization → Per-client auth used/remaining/expiring
+  New Frontend:
+    - Auth utilization table page or expanded sidebar widget
+    - Expiration alerts surfaced on billing page
+
+PHASE 3 — Claim Generation + Export
+  New Backend:
+    - GET  /api/billing/claims/{id}    → Claim detail with line items
+    - POST /api/billing/claims/export  → 837P flat file or CSV download
+  New Frontend:
+    - Claim detail modal
+    - Export button with format selector (CSV / 837P stub)
+
+PHASE 4 — Denial Management + Remittance
+  New DB:
+    - care.billing_payments (ERA posting)
+  New Backend:
+    - POST /api/billing/era-upload  → parse 835 ERA, post payments
+    - PATCH /api/billing/claims/{id}/status
+  New Frontend:
+    - Denial queue panel with reason codes
+    - Payment reconciliation view
+
+================================================================================
+BACKEND SCHEMAS NEEDED (Phase 1)
+================================================================================
+
+BillingEntry:
+  visit_id, service_date, client_name, employee_name, service_code (HCPCS),
+  billed_units, approved_units, evv_status, approval_status,
+  sandata_status, hhax_status, default_rate, estimated_amount,
+  claim_id (nullable — null if not yet claimed), billing_status
+
+BillingStats:
+  total_visits, total_units, total_estimated_amount,
+  ready_to_bill, pending_claims, approved, denied
+
+BillingClaimCreate:
+  visit_ids: list[int], payer: str
+
+BillingClaimResponse:
+  id, claim_date, payer, status, total_units, total_amount, visit_count
+
+================================================================================
+SQL MIGRATION CHECKLIST (Phase 1)
+================================================================================
+
+Step 1: ALTER TABLE care.service_codes ADD default_rate DECIMAL(10,2) NULL
+Step 2: CREATE TABLE care.billing_claims (...)
+Step 3: CREATE TABLE care.billing_claim_visits (claim_id, visit_id, units, amount)
+Step 4: UPDATE care.service_codes SET default_rate = <seed values> (manual)
+
+Run as: sql/billing_phase1_migration.sql
+
+================================================================================
+STATUS
+================================================================================
+
+Phase 1: COMPLETE (2026-03-20)
+  Files: sql/billing_phase1_migration.sql, backend/routers/billing.py,
+         backend/schemas.py, backend/main.py, lib/queries/billing.ts,
+         components/billing-claims-panel.tsx, components/billing-generate-btn.tsx,
+         app/billing/page.tsx
+
+Phase 2: COMPLETE (2026-03-20)
+  Files: backend/schemas.py (+AuthUtilizationItem),
+         backend/routers/billing.py (+GET /auth-utilization),
+         lib/queries/billing.ts (+getAuthUtilization),
+         app/billing/page.tsx (sidebar widget + expiring alerts)
+
+Phase 3: COMPLETE (2026-03-20)
+  Files: backend/schemas.py (+Claim detail/list schemas),
+         backend/routers/billing.py (+GET /claims, /claims/{id}, /claims/{id}/export, /export),
+         lib/queries/billing.ts (+getClaimsList, getClaimDetail, claimExportUrl, billingExportUrl),
+         components/billing-history-panel.tsx (new — claims list + ClaimDetailModal),
+         app/billing/page.tsx (BillingHistoryPanel, Export CSV link)
+
+Status Management + Bulk Generation: COMPLETE (2026-03-21)
+  Built on top of Phase 3 before starting Phase 4.
+  Files: backend/schemas.py (+ClaimGroup, ClaimGroupPreview, ClaimStatusUpdate,
+           BulkGenerateRequest, BulkGenerateResponse),
+         backend/routers/billing.py (+_build_groups helper, _VALID_TRANSITIONS,
+           GET /group-visits, POST /generate-bulk, PATCH /claims/{id}/status),
+         lib/queries/billing.ts (+ClaimGroup/Preview/BulkGenerate interfaces,
+           getClaimGroups, generateBulkClaims, updateClaimStatus),
+         components/billing-generate-all-btn.tsx (new — topbar bulk generate with preview modal),
+         components/billing-history-panel.tsx (+status dropdown per row),
+         components/billing-generate-btn.tsx (+router.refresh + event dispatch),
+         app/billing/page.tsx (+BillingGenerateAllBtn in topbar)
+
+  Grouping rules implemented:
+    - Group by: client_id + payer (from visit_integration_status) +
+                service_authorization_id + billing_week (Mon–Sun)
+    - Eligibility: visit_cancelled=0, approved, evv verified/adjusted,
+                   units>0, not already claimed
+    - Week formula: DATEFIRST-agnostic Monday calculation
+    - Valid status transitions: Draft→Ready/Voided, Ready→Submitted/Voided,
+                                Submitted→Paid/Denied/Voided
+
+Phase 4: NOT STARTED
+  Remaining: care.billing_payments table, POST /era-upload (835 ERA parsing),
+             denial queue panel with reason codes, payment reconciliation view
+  Note: PATCH /claims/{id}/status already implemented above.
+
+Last updated: 2026-03-21
+================================================================================
