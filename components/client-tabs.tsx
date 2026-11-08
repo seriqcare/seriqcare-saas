@@ -115,6 +115,7 @@ function EField({
 /* ── Tab: Profile ─────────────────────────────────────── */
 function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
   const router = useRouter();
+  const { apiFetch } = useAuth();
   const init = {
     name:       c.name ?? '',
     client_code: c.client_code ?? '',
@@ -173,10 +174,15 @@ function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
       payload.last_name = parts.slice(1).join(' ') || parts[0];
       delete payload.name;
     }
-    await updateClient(clientId, payload);
-    setSaving(false);
-    setEditing((p) => ({ ...p, [section]: false }));
-    router.refresh();
+    try {
+      await updateClient(clientId, payload, apiFetch);
+      setEditing((p) => ({ ...p, [section]: false }));
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to update client.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -219,7 +225,7 @@ function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
 /* ── Tab: Address & Personal ──────────────────────────── */
 function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, apiFetch } = useAuth();
   const [detail, setDetail] = useState<ClientDetail | null>(null);
   const [detailError, setDetailError] = useState('');
   const [editing, setEditing] = useState<Record<string, boolean>>({});
@@ -315,14 +321,18 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
         payload[apiKey] = localVals[localKey];
       }
     }
-    if (Object.keys(payload).length > 0) {
-      await updateClient(clientId, payload);
+    try {
+      if (Object.keys(payload).length > 0) {
+        await updateClient(clientId, payload, apiFetch);
+      }
+      setEditing((p) => ({ ...p, [s]: false }));
+      if (user?.token) {
+        getClientDetail(clientId, user.token).then(setDetail).catch(() => {});
+      }
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to update client.');
     }
-    setEditing((p) => ({ ...p, [s]: false }));
-    if (user?.token) {
-      getClientDetail(clientId, user.token).then(setDetail).catch(() => {});
-    }
-    router.refresh();
   }
 
   if (!detail) {
@@ -592,7 +602,12 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
       if (vals.reviewed)      payload.care_plan_review_date  = vals.reviewed;
       if (vals.notes)         payload.care_plan_notes        = vals.notes;
       if (Object.keys(payload).length > 0) {
-        await updateClient(clientId, payload);
+        try {
+          await updateClient(clientId, payload, apiFetch);
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : 'Failed to update care plan.');
+          return;
+        }
       }
     }
     setEditing((p) => ({ ...p, [s]: false }));

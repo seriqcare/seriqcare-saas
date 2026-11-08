@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/components/auth-context';
 import {
   getClaimsList,
   getClaimDetail,
@@ -302,6 +303,7 @@ function actionBtnStyle(style: 'primary' | 'secondary' | 'danger'): React.CSSPro
 
 /* ── Billing History Panel ────────────────────────────────── */
 export function BillingHistoryPanel({ modeConfig }: { modeConfig: ModeConfig }) {
+  const { apiFetch } = useAuth();
   const [claims, setClaims] = useState<BillingClaimListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -331,10 +333,12 @@ export function BillingHistoryPanel({ modeConfig }: { modeConfig: ModeConfig }) 
 
   async function handleStatusChange(claimId: number, newStatus: string) {
     setUpdatingId(claimId);
-    const res = await updateClaimStatus(claimId, newStatus);
+    const res = await updateClaimStatus(claimId, newStatus, apiFetch);
     if (res.success && res.updated) {
       setClaims((prev) => prev.map((c) => c.id === claimId ? res.updated! : c));
       window.dispatchEvent(new CustomEvent('billing:claim-generated'));
+    } else {
+      alert(res.message);
     }
     setUpdatingId(null);
   }

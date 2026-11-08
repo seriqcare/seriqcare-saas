@@ -60,10 +60,42 @@ def _client_care_task_history_table_exists(db: Session) -> bool:
     return row is not None and row.obj_id is not None
 
 
-def _ensure_client_exists(client_id: int, db: Session) -> None:
+def get_client_agency_scope(
+    scope: AgencyScope = Depends(get_agency_scope),
+    current_user: User = Depends(get_current_user),
+) -> AgencyScope:
+    if current_user.role != "super_admin" and current_user.agency_id is None:
+        raise HTTPException(status_code=403, detail="Agency membership required.")
+    return scope
+
+
+def _ensure_client_exists(client_id: int, db: Session, scope: AgencyScope) -> None:
     row = db.execute(
-        text("SELECT id FROM care.clients WHERE id = :client_id AND is_active = 1"),
-        {"client_id": client_id},
+        text(f"SELECT c.id FROM care.clients c WHERE c.id = :client_id AND c.is_active = 1 AND {scope.sql_filter('c')}"),
+        scope.bind({"client_id": client_id}),
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Client not found.")
+
+
+def _ensure_completion_access(client_id: int, db: Session, user: User) -> None:
+    if user.role in ("coordinator", "agency_admin", "super_admin"):
+        if user.role != "super_admin" and user.agency_id is None:
+            raise HTTPException(status_code=403, detail="Agency membership required.")
+        _ensure_client_exists(client_id, db, AgencyScope(user))
+        return
+    if user.role != "caregiver" or user.agency_id is None or user.employee_id is None:
+        raise HTTPException(status_code=403, detail="Access denied.")
+    row = db.execute(
+        text("""
+            SELECT c.id
+            FROM care.clients c
+            JOIN care.schedules s ON s.client_id = c.id AND s.agency_id = c.agency_id
+            WHERE c.id = :client_id AND c.is_active = 1
+              AND c.agency_id = :agency_id AND s.employee_id = :employee_id
+              AND s.status <> 'Cancelled'
+        """),
+        {"client_id": client_id, "agency_id": user.agency_id, "employee_id": user.employee_id},
     ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Client not found.")
@@ -342,7 +374,7 @@ def create_client(
 def get_client(
     client_id: int,
     db: Session = Depends(get_db),
-    scope: AgencyScope = Depends(get_agency_scope),
+    scope: AgencyScope = Depends(get_client_agency_scope),
 ):
     """Return full detail for a single client."""
     try:
@@ -446,11 +478,11 @@ def get_client(
 def get_client_insurance(
     client_id: int,
     db: Session = Depends(get_db),
-    scope: AgencyScope = Depends(get_agency_scope),
+    scope: AgencyScope = Depends(get_client_agency_scope),
 ):
     """Return payer/insurance records for a client."""
     try:
-        _ensure_client_exists(client_id, db)
+        _ensure_client_exists(client_id, db, scope)
         rows = db.execute(
             text("""
                 SELECT
@@ -494,11 +526,11 @@ def get_client_insurance(
 def get_client_authorizations(
     client_id: int,
     db: Session = Depends(get_db),
-    scope: AgencyScope = Depends(get_agency_scope),
+    scope: AgencyScope = Depends(get_client_agency_scope),
 ):
     """Return service authorizations for a client."""
     try:
-        _ensure_client_exists(client_id, db)
+        _ensure_client_exists(client_id, db, scope)
         rows = db.execute(
             text("""
                 SELECT
@@ -553,11 +585,11 @@ def get_client_visits(
     client_id: int,
     limit: int = Query(25, ge=1, le=100),
     db: Session = Depends(get_db),
-    scope: AgencyScope = Depends(get_agency_scope),
+    scope: AgencyScope = Depends(get_client_agency_scope),
 ):
     """Return recent visits for a client."""
     try:
-        _ensure_client_exists(client_id, db)
+        _ensure_client_exists(client_id, db, scope)
         rows = db.execute(
             text("""
                 SELECT TOP (:limit)
@@ -641,6 +673,7 @@ def get_clients(
             params["search"] = f"%{search.strip()}%"
 
         where_sql = "WHERE " + " AND ".join(where_parts)
+        stats_client_where = where_sql.replace("c.", "sc_client.")
 
         # ------------------------------------------------------------------
         # Stats query
@@ -662,14 +695,22 @@ def get_clients(
                           THEN 1 END) AS due_for_review,
                     (SELECT COUNT(DISTINCT s.employee_id)
                      FROM care.schedules s
+                     JOIN care.employees e ON e.id = s.employee_id AND e.agency_id = s.agency_id
                      WHERE s.employee_id IS NOT NULL
+                       AND {scope.sql_filter('s')}
+                       AND EXISTS (SELECT 1 FROM care.clients sc_client {stats_client_where}
+                                   AND sc_client.id = s.client_id AND sc_client.agency_id = s.agency_id)
                        AND s.scheduled_start >= {SQLSERVER_LOCAL_WEEK_START_DATE_EXPR}
                        AND s.scheduled_start < DATEADD(DAY, 7, {SQLSERVER_LOCAL_WEEK_START_DATE_EXPR})
                     ) AS assigned_caregivers,
                     (SELECT COUNT(*) FROM (
                         SELECT s.client_id
                         FROM care.schedules s
+                        JOIN care.employees e ON e.id = s.employee_id AND e.agency_id = s.agency_id
                         WHERE s.employee_id IS NOT NULL
+                          AND {scope.sql_filter('s')}
+                          AND EXISTS (SELECT 1 FROM care.clients sc_client {stats_client_where}
+                                      AND sc_client.id = s.client_id AND sc_client.agency_id = s.agency_id)
                           AND s.scheduled_start >= {SQLSERVER_LOCAL_WEEK_START_DATE_EXPR}
                           AND s.scheduled_start < DATEADD(DAY, 7, {SQLSERVER_LOCAL_WEEK_START_DATE_EXPR})
                         GROUP BY s.client_id
@@ -682,6 +723,9 @@ def get_clients(
                      FROM care.visits v
                      JOIN care.visit_evv ev ON ev.visit_id = v.id
                      WHERE ev.evv_status IN ('Pending','Failed') AND v.visit_cancelled = 0
+                       AND {scope.sql_filter('v')}
+                       AND EXISTS (SELECT 1 FROM care.clients sc_client {stats_client_where}
+                                   AND sc_client.id = v.client_id AND sc_client.agency_id = v.agency_id)
                     ) AS urgent_followup
                 FROM care.clients c
                 {where_sql}
@@ -723,20 +767,20 @@ def get_clients(
                     (SELECT TOP 1 sc.description
                      FROM care.service_authorizations sa
                      JOIN care.service_codes sc ON sa.service_code_id = sc.id
-                     WHERE sa.client_id = c.id AND sa.is_active = 1
+                     WHERE sa.client_id = c.id AND sa.agency_id = c.agency_id AND sa.is_active = 1
                      ORDER BY sa.created_at DESC
                     ) AS service_type,
                     -- primary caregiver from most recent schedule
                     (SELECT TOP 1 e.first_name + ' ' + e.last_name
                      FROM care.schedules s
-                     JOIN care.employees e ON s.employee_id = e.id
-                     WHERE s.client_id = c.id AND s.employee_id IS NOT NULL
+                     JOIN care.employees e ON s.employee_id = e.id AND e.agency_id = s.agency_id
+                     WHERE s.client_id = c.id AND s.agency_id = c.agency_id AND s.employee_id IS NOT NULL
                      ORDER BY s.scheduled_start DESC
                     ) AS primary_caregiver,
                     -- next upcoming visit
                     (SELECT TOP 1 CONVERT(VARCHAR, s.scheduled_start, 120)
                      FROM care.schedules s
-                     WHERE s.client_id = c.id
+                     WHERE s.client_id = c.id AND s.agency_id = c.agency_id
                        AND s.scheduled_start >= {SQLSERVER_EASTERN_NOW_EXPR}
                        AND s.status NOT IN ('Cancelled', 'Completed')
                      ORDER BY s.scheduled_start ASC
@@ -805,9 +849,10 @@ def get_client_care_tasks(
         description="Optional completion date in YYYY-MM-DD. Defaults to today.",
     ),
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_client_agency_scope),
 ):
     try:
-        _ensure_client_exists(client_id, db)
+        _ensure_client_exists(client_id, db, scope)
         target_date = date.fromisoformat(for_date) if for_date else None
         return _read_client_care_tasks(client_id, db, target_date)
     except HTTPException:
@@ -823,9 +868,10 @@ def update_client_care_tasks(
     client_id: int,
     body: ClientCareTasksUpdateRequest,
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_client_agency_scope),
 ):
     try:
-        _ensure_client_exists(client_id, db)
+        _ensure_client_exists(client_id, db, scope)
         now_local = now_eastern_naive()
         if not _client_care_tasks_table_exists(db):
             raise HTTPException(
@@ -927,7 +973,7 @@ def set_client_care_task_completion(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        _ensure_client_exists(client_id, db)
+        _ensure_completion_access(client_id, db, current_user)
         now_local = now_eastern_naive()
         if not _client_care_tasks_table_exists(db) or not _client_care_task_history_table_exists(db):
             raise HTTPException(
@@ -1058,9 +1104,11 @@ def update_client(
     client_id: int,
     payload: ClientUpdateRequest,
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_client_agency_scope),
 ):
     from backend.schemas import ClientUpdateResponse
     try:
+        _ensure_client_exists(client_id, db, scope)
         now_local = now_eastern_naive()
         # Build dynamic SET clause from non-None fields
         set_parts: list[str] = []
@@ -1097,7 +1145,7 @@ def update_client(
         for field, col in field_map.items():
             val = getattr(payload, field)
             if val is not None:
-                set_parts.append(f"c.{col} = :{field}")
+                set_parts.append(f"{col} = :{field}")
                 params[field] = val
 
         if set_parts:
@@ -1148,6 +1196,9 @@ def update_client(
         db.commit()
         return ClientUpdateResponse(success=True, id=client_id, message="Client updated successfully")
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Update failed: {exc}") from exc

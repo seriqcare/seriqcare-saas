@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from db.database import get_db
 from backend.auth.dependencies import get_agency_scope, AgencyScope
 from backend.schemas import VisitEntry, VisitStats, VisitsResponse, VisitSubmitResponse, VisitFixRequest, VisitFixResponse, VisitValidateResponse, VisitValidateAllResponse
-from backend.routers.aggregator import _do_submit
+from backend.routers.aggregator import _do_submit, get_aggregator_scope
 from backend.services.evv_validation import validate_and_gate
 from backend.services.timezone import UTC, now_eastern_naive
 
@@ -275,7 +275,7 @@ def get_visits(
 def submit_visit(
     visit_id: int,
     db: Session = Depends(get_db),
-    scope: AgencyScope = Depends(get_agency_scope),
+    scope: AgencyScope = Depends(get_aggregator_scope),
 ):
     """
     Build a PA-DHS EVV Vendor Spec v1.4 payload and submit to Sandata.
@@ -289,7 +289,7 @@ def submit_visit(
             detail="EVV submission is not available on the Core plan.",
         )
     try:
-        result = _do_submit(visit_id, db)
+        result = _do_submit(visit_id, db, scope)
         _sync_timesheet(visit_id, db)
         return result
     except HTTPException:

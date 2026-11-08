@@ -339,7 +339,7 @@ def generate_claim(
         visit_rows = db.execute(
             text(f"""
                 SELECT
-                    v.id,
+                    v.id, v.agency_id,
                     CAST(
                         COALESCE(vb.approved_units, vb.billed_units, 0)
                     AS FLOAT) AS units,
@@ -348,6 +348,8 @@ def generate_claim(
                         ISNULL(sc.default_rate, 0)
                     AS FLOAT) AS amount
                 FROM care.visits v
+                JOIN care.clients c ON c.id = v.client_id AND c.agency_id = v.agency_id
+                JOIN care.employees e ON e.id = v.employee_id AND e.agency_id = v.agency_id
                 JOIN  care.service_codes sc ON sc.id = v.service_code_id
                 LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
                 WHERE v.id IN ({placeholders})
@@ -357,10 +359,13 @@ def generate_claim(
             scope.bind({}),
         ).fetchall()
 
-        if not visit_rows:
+        if not visit_rows or {int(r.id) for r in visit_rows} != set(visit_id_list):
             raise HTTPException(status_code=404, detail="No eligible visits found for provided IDs")
 
-        agency_id    = scope.agency_id
+        agency_ids = {r.agency_id for r in visit_rows}
+        if len(agency_ids) != 1 or None in agency_ids:
+            raise HTTPException(status_code=400, detail="All visits must belong to one agency")
+        agency_id    = next(iter(agency_ids))
         total_units  = round(sum(float(r.units  or 0) for r in visit_rows), 2)
         total_amount = round(sum(float(r.amount or 0) for r in visit_rows), 2)
 
@@ -613,9 +618,10 @@ def get_claim_detail(
                     CAST(bcv.units  AS FLOAT)                                   AS units,
                     CAST(bcv.amount AS FLOAT)                                   AS amount
                 FROM care.billing_claim_visits bcv
-                JOIN  care.visits        v   ON v.id  = bcv.visit_id
-                JOIN  care.clients       c   ON c.id  = v.client_id
-                JOIN  care.employees     e   ON e.id  = v.employee_id
+                JOIN  care.billing_claims bcl ON bcl.id = bcv.claim_id
+                JOIN  care.visits        v   ON v.id = bcv.visit_id AND v.agency_id = bcl.agency_id
+                JOIN  care.clients       c   ON c.id  = v.client_id AND c.agency_id = v.agency_id
+                JOIN  care.employees     e   ON e.id  = v.employee_id AND e.agency_id = v.agency_id
                 JOIN  care.service_codes sc  ON sc.id = v.service_code_id
                 WHERE bcv.claim_id = :claim_id
                 ORDER BY v.service_date, bcv.id
@@ -828,7 +834,8 @@ _GROUPING_QUERY = """
             ISNULL(sc.default_rate, 0)
         AS FLOAT)                                                   AS amount
     FROM care.visits v
-    JOIN  care.clients       c   ON c.id  = v.client_id
+    JOIN  care.clients       c   ON c.id = v.client_id AND c.agency_id = v.agency_id
+    JOIN  care.employees     e   ON e.id = v.employee_id AND e.agency_id = v.agency_id
     JOIN  care.service_codes sc  ON sc.id = v.service_code_id
     LEFT JOIN care.visit_evv                ev  ON ev.visit_id  = v.id
     LEFT JOIN care.visit_billing            vb  ON vb.visit_id  = v.id
@@ -841,24 +848,25 @@ _GROUPING_QUERY = """
       AND bcv.visit_id IS NULL
       AND v.service_date >= :period_start
       AND v.service_date <= :period_end
+      AND {agency_filter}
     ORDER BY v.client_id, week_start
 """
 
 
-def _build_groups(db: Session, period_start: date, period_end: date) -> list[dict]:
+def _build_groups(db: Session, period_start: date, period_end: date, scope: AgencyScope) -> list[dict]:
     """
     Find all eligible, unclaimed visits in the period and group by
     (client_id, payer, service_authorization_id, billing_week).
     Returns a list of group dicts including per-visit detail for claim insertion.
     """
     rows = db.execute(
-        text(_GROUPING_QUERY),
-        {"period_start": period_start.isoformat(), "period_end": period_end.isoformat()},
+        text(_GROUPING_QUERY.format(agency_filter=scope.sql_filter("v"))),
+        scope.bind({"period_start": period_start.isoformat(), "period_end": period_end.isoformat()}),
     ).fetchall()
 
     bucket: dict[tuple, dict] = {}
     for r in rows:
-        key = (r.client_id, r.payer, r.service_authorization_id, r.week_start)
+        key = (r.agency_id, r.client_id, r.payer, r.service_authorization_id, r.week_start)
         if key not in bucket:
             bucket[key] = {
                 "agency_id":               r.agency_id,
@@ -890,11 +898,12 @@ def _build_groups(db: Session, period_start: date, period_end: date) -> list[dic
 def preview_claim_groups(
     period: str = Query(default="this_month"),
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
 ):
     """Return how Ready visits will be grouped into claims, without creating anything."""
     try:
         period_start, period_end = _period_bounds(period)
-        raw = _build_groups(db, period_start, period_end)
+        raw = _build_groups(db, period_start, period_end, scope)
 
         groups = []
         for g in raw:
@@ -932,6 +941,7 @@ def preview_claim_groups(
 def generate_bulk_claims(
     body: BulkGenerateRequest,
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
 ):
     """
     Group all Ready-to-bill unclaimed visits for the period and create one
@@ -940,7 +950,7 @@ def generate_bulk_claims(
     """
     try:
         period_start, period_end = _period_bounds(body.period)
-        raw = _build_groups(db, period_start, period_end)
+        raw = _build_groups(db, period_start, period_end, scope)
 
         if not raw:
             raise HTTPException(status_code=404, detail="No Ready-to-bill visits found for this period")
@@ -1013,6 +1023,7 @@ def update_claim_status(
     claim_id: int,
     body: ClaimStatusUpdate,
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
 ):
     """
     Advance a claim's status.  Valid transitions:
@@ -1022,7 +1033,7 @@ def update_claim_status(
     """
     try:
         row = db.execute(
-            text("""
+            text(f"""
                 SELECT
                     bcl.id, bcl.status,
                     CAST(bcl.total_units  AS FLOAT)       AS total_units,
@@ -1033,11 +1044,11 @@ def update_claim_status(
                     COUNT(bcv.id)                         AS visit_count
                 FROM care.billing_claims bcl
                 LEFT JOIN care.billing_claim_visits bcv ON bcv.claim_id = bcl.id
-                WHERE bcl.id = :claim_id
+                WHERE bcl.id = :claim_id AND {scope.sql_filter("bcl")}
                 GROUP BY bcl.id, bcl.status, bcl.total_units, bcl.total_amount,
                          bcl.claim_date, bcl.payer, bcl.created_at
             """),
-            {"claim_id": claim_id},
+            scope.bind({"claim_id": claim_id}),
         ).fetchone()
 
         if not row:
@@ -1055,8 +1066,9 @@ def update_claim_status(
                 UPDATE care.billing_claims
                 SET status = :status, updated_at = {SQLSERVER_EASTERN_NOW_EXPR}
                 WHERE id = :claim_id
+                  AND {scope.sql_filter()}
             """),
-            {"status": body.status, "claim_id": claim_id},
+            scope.bind({"status": body.status, "claim_id": claim_id}),
         )
         db.commit()
 

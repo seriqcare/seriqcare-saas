@@ -45,7 +45,7 @@ def _parse_schedule_datetime(value: str) -> datetime:
     return parsed
 
 
-def _resolve_service_code_id(db: Session, client_id: int, service_code: str | None):
+def _resolve_service_code_id(db: Session, client_id: int, service_code: str | None, agency_id: int):
     service_code_value = service_code.strip() if service_code else ""
     if service_code_value:
         return db.execute(
@@ -66,12 +66,33 @@ def _resolve_service_code_id(db: Session, client_id: int, service_code: str | No
             """
             SELECT TOP 1 sa.service_code_id AS id
             FROM care.service_authorizations sa
-            WHERE sa.client_id = :client_id AND sa.is_active = 1
+            WHERE sa.client_id = :client_id AND sa.agency_id = :agency_id AND sa.is_active = 1
             ORDER BY sa.created_at DESC, sa.id DESC
             """
         ),
-        {"client_id": client_id},
+        {"client_id": client_id, "agency_id": agency_id},
     ).fetchone()
+
+
+def _schedule_client_agency(db: Session, client_id: int, scope: AgencyScope) -> int:
+    client = db.execute(
+        text(f"SELECT c.id, c.agency_id FROM care.clients c WHERE c.id = :client_id AND c.is_active = 1 AND {scope.sql_filter('c')}"),
+        scope.bind({"client_id": client_id}),
+    ).fetchone()
+    if not client or client.agency_id is None:
+        raise HTTPException(status_code=404, detail="Client not found.")
+    return int(client.agency_id)
+
+
+def _ensure_schedule_employee(db: Session, employee_id: int | None, agency_id: int) -> None:
+    if employee_id is None:
+        return
+    employee = db.execute(
+        text("SELECT id FROM care.employees WHERE id = :employee_id AND agency_id = :agency_id AND is_active = 1"),
+        {"employee_id": employee_id, "agency_id": agency_id},
+    ).fetchone()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Caregiver not found.")
 
 
 @router.get("/service-codes")
@@ -138,10 +159,11 @@ def get_week_schedule(
                     s.employee_id,
                     DATEPART(WEEKDAY, s.scheduled_start) AS day_of_week_sql
                 FROM care.schedules s
-                JOIN  care.clients       c  ON s.client_id      = c.id
-                LEFT JOIN care.employees e  ON s.employee_id    = e.id
+                JOIN  care.clients       c  ON s.client_id = c.id AND c.agency_id = s.agency_id
+                LEFT JOIN care.employees e  ON s.employee_id = e.id AND e.agency_id = s.agency_id
                 JOIN  care.service_codes sc ON s.service_code_id = sc.id
                 WHERE {scope.sql_filter("s")}
+                  AND (s.employee_id IS NULL OR e.id IS NOT NULL)
                   AND s.scheduled_start >= :week_start
                   AND s.scheduled_start < DATEADD(DAY, 1, CAST(:week_end AS DATE))
                   AND s.status != 'Cancelled'
@@ -283,34 +305,9 @@ def create_schedule(
                 detail="Scheduled end time must be after the start time.",
             )
 
-        client_row = db.execute(
-            text(
-                """
-                SELECT id
-                FROM care.clients
-                WHERE id = :client_id AND is_active = 1
-                """
-            ),
-            {"client_id": body.client_id},
-        ).fetchone()
-        if not client_row:
-            raise HTTPException(status_code=404, detail="Client not found.")
-
-        if body.employee_id is not None:
-            employee_row = db.execute(
-                text(
-                    """
-                    SELECT id
-                    FROM care.employees
-                    WHERE id = :employee_id AND is_active = 1
-                    """
-                ),
-                {"employee_id": body.employee_id},
-            ).fetchone()
-            if not employee_row:
-                raise HTTPException(status_code=404, detail="Caregiver not found.")
-
-        service_row = _resolve_service_code_id(db, body.client_id, body.service_code)
+        agency_id = _schedule_client_agency(db, body.client_id, scope)
+        _ensure_schedule_employee(db, body.employee_id, agency_id)
+        service_row = _resolve_service_code_id(db, body.client_id, body.service_code, agency_id)
 
         if not service_row:
             raise HTTPException(
@@ -344,7 +341,7 @@ def create_schedule(
                 "scheduled_end": end_dt,
                 "status": status_value,
                 "notes": notes_value,
-                "agency_id": scope.agency_id,
+                "agency_id": agency_id,
                 "created_at": now_local,
             },
         ).fetchone()
@@ -377,7 +374,7 @@ def update_schedule(
         existing = db.execute(
             text(
                 f"""
-                SELECT id
+                SELECT id, agency_id
                 FROM care.schedules
                 WHERE id = :schedule_id
                   AND {scope.sql_filter()}
@@ -396,34 +393,11 @@ def update_schedule(
                 detail="Scheduled end time must be after the start time.",
             )
 
-        client_row = db.execute(
-            text(
-                """
-                SELECT id
-                FROM care.clients
-                WHERE id = :client_id AND is_active = 1
-                """
-            ),
-            {"client_id": body.client_id},
-        ).fetchone()
-        if not client_row:
+        agency_id = _schedule_client_agency(db, body.client_id, scope)
+        if existing.agency_id is None or existing.agency_id != agency_id:
             raise HTTPException(status_code=404, detail="Client not found.")
-
-        if body.employee_id is not None:
-            employee_row = db.execute(
-                text(
-                    """
-                    SELECT id
-                    FROM care.employees
-                    WHERE id = :employee_id AND is_active = 1
-                    """
-                ),
-                {"employee_id": body.employee_id},
-            ).fetchone()
-            if not employee_row:
-                raise HTTPException(status_code=404, detail="Caregiver not found.")
-
-        service_row = _resolve_service_code_id(db, body.client_id, body.service_code)
+        _ensure_schedule_employee(db, body.employee_id, agency_id)
+        service_row = _resolve_service_code_id(db, body.client_id, body.service_code, agency_id)
         if not service_row:
             raise HTTPException(
                 status_code=400,
@@ -439,7 +413,7 @@ def update_schedule(
 
         db.execute(
             text(
-                """
+                f"""
                 UPDATE care.schedules
                 SET client_id = :client_id,
                     employee_id = :employee_id,
@@ -449,9 +423,10 @@ def update_schedule(
                     status = :status,
                     notes = :notes
                 WHERE id = :schedule_id
+                  AND {scope.sql_filter()}
                 """
             ),
-            {
+            scope.bind({
                 "schedule_id": schedule_id,
                 "client_id": body.client_id,
                 "employee_id": body.employee_id,
@@ -460,7 +435,7 @@ def update_schedule(
                 "scheduled_end": end_dt,
                 "status": status_value,
                 "notes": notes_value,
-            },
+            }),
         )
         db.commit()
 

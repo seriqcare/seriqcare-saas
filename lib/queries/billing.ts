@@ -203,24 +203,21 @@ export async function getBillingStats(period = 'this_month'): Promise<BillingSta
   return FALLBACK_STATS;
 }
 
-export async function getClaimGroups(period = 'this_month'): Promise<ClaimGroupPreview> {
+type ApiFetch = (url: string, init?: RequestInit) => Promise<Response>;
+
+export async function getClaimGroups(period: string, apiFetch: ApiFetch): Promise<ClaimGroupPreview> {
   const qs = new URLSearchParams({ period }).toString();
-  const authHeaders = await getAuthHeaders();
-  for (const url of apiUrls(`/api/billing/group-visits?${qs}`)) {
-    try {
-      const res = await fetchWithTimeout(url, 8000, authHeaders);
-      if (res.ok) return res.json();
-    } catch { /* try next */ }
-  }
-  return { groups: [], total_groups: 0, total_visits: 0, total_units: 0, total_amount: 0 };
+  const res = await apiFetch(`/api/billing/group-visits?${qs}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Claim preview failed (HTTP ${res.status})`);
+  return res.json();
 }
 
 export async function generateBulkClaims(
   period: string,
+  apiFetch: ApiFetch,
 ): Promise<{ success: boolean; result?: BulkGenerateResponse; message: string }> {
-  for (const url of apiUrls('/api/billing/generate-bulk')) {
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch('/api/billing/generate-bulk', {
         method: 'POST',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
@@ -232,18 +229,16 @@ export async function generateBulkClaims(
       }
       const err = await res.json().catch(() => ({}));
       return { success: false, message: (err as { detail?: string }).detail ?? `HTTP ${res.status}` };
-    } catch { /* try next */ }
-  }
-  return { success: false, message: 'API unreachable' };
+    } catch { return { success: false, message: 'API unreachable' }; }
 }
 
 export async function updateClaimStatus(
   claimId: number,
   status: string,
+  apiFetch: ApiFetch,
 ): Promise<{ success: boolean; updated?: BillingClaimListItem; message: string }> {
-  for (const url of apiUrls(`/api/billing/claims/${claimId}/status`)) {
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(`/api/billing/claims/${claimId}/status`, {
         method: 'PATCH',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
@@ -255,9 +250,7 @@ export async function updateClaimStatus(
       }
       const err = await res.json().catch(() => ({}));
       return { success: false, message: (err as { detail?: string }).detail ?? `HTTP ${res.status}` };
-    } catch { /* try next */ }
-  }
-  return { success: false, message: 'API unreachable' };
+    } catch { return { success: false, message: 'API unreachable' }; }
 }
 
 export async function getClaimsList(

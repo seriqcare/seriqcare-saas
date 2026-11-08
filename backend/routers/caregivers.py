@@ -420,17 +420,16 @@ def create_caregiver(
 
 
 @router.get("/{caregiver_id}/payroll", response_model=CaregiverPayrollSettingsResponse)
-def get_caregiver_payroll(caregiver_id: int, db: Session = Depends(get_db)):
+def get_caregiver_payroll(caregiver_id: int, db: Session = Depends(get_db), scope: AgencyScope = Depends(get_agency_scope)):
     try:
-        ensure_default_pay_group(db)
-
         caregiver = db.execute(
-            text("SELECT id FROM care.employees WHERE id = :id"),
-            {"id": caregiver_id},
+            text(f"SELECT e.id FROM care.employees e WHERE e.id = :id AND {scope.sql_filter('e')}"),
+            scope.bind({"id": caregiver_id}),
         ).fetchone()
         if not caregiver:
             raise HTTPException(status_code=404, detail=f"Caregiver {caregiver_id} not found.")
 
+        ensure_default_pay_group(db)
         row = db.execute(
             text(
                 """
@@ -471,17 +470,17 @@ def update_caregiver_payroll(
     caregiver_id: int,
     body: CaregiverPayrollSettingsUpdateRequest,
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
 ):
     try:
-        ensure_default_pay_group(db)
-
         caregiver = db.execute(
-            text("SELECT id FROM care.employees WHERE id = :id"),
-            {"id": caregiver_id},
+            text(f"SELECT e.id FROM care.employees e WHERE e.id = :id AND {scope.sql_filter('e')}"),
+            scope.bind({"id": caregiver_id}),
         ).fetchone()
         if not caregiver:
             raise HTTPException(status_code=404, detail=f"Caregiver {caregiver_id} not found.")
 
+        ensure_default_pay_group(db)
         pay_group_id = int(body.pay_group_id) if body.pay_group_id is not None else None
         pay_group_rate_id = int(body.pay_group_rate_id) if body.pay_group_rate_id is not None else None
 

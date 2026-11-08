@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/auth-context';
 import {
   getClaimGroups,
   generateBulkClaims,
@@ -33,6 +34,7 @@ type Step = 'idle' | 'loading' | 'preview' | 'generating' | 'done' | 'error';
 
 export function BillingGenerateAllBtn({ readyCount, period, modeConfig }: Props) {
   const router = useRouter();
+  const { apiFetch } = useAuth();
   const [step, setStep]       = useState<Step>('idle');
   const [preview, setPreview] = useState<ClaimGroupPreview | null>(null);
   const [result, setResult]   = useState<BulkGenerateResponse | null>(null);
@@ -40,7 +42,14 @@ export function BillingGenerateAllBtn({ readyCount, period, modeConfig }: Props)
 
   async function openPreview() {
     setStep('loading');
-    const data = await getClaimGroups(period);
+    let data: ClaimGroupPreview;
+    try {
+      data = await getClaimGroups(period, apiFetch);
+    } catch (error) {
+      setErrMsg(error instanceof Error ? error.message : 'Claim preview failed');
+      setStep('error');
+      return;
+    }
     if (data.total_groups === 0) {
       setErrMsg('No Ready-to-bill visits found for this period.');
       setStep('error');
@@ -53,7 +62,7 @@ export function BillingGenerateAllBtn({ readyCount, period, modeConfig }: Props)
   async function confirmGenerate() {
     if (!preview) return;
     setStep('generating');
-    const res = await generateBulkClaims(period);
+    const res = await generateBulkClaims(period, apiFetch);
     if (res.success && res.result) {
       setResult(res.result);
       setStep('done');

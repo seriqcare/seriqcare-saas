@@ -1,3 +1,5 @@
+import { getAuthHeaders } from './server-auth';
+
 const API = process.env.API_BASE_URL ?? 'http://localhost:8000';
 
 // ---------------------------------------------------------------------------
@@ -65,9 +67,6 @@ export interface VisitSubmitResult {
 // ---------------------------------------------------------------------------
 // Fallbacks
 // ---------------------------------------------------------------------------
-const QUEUE_FALLBACK: AggregatorQueueResponse = { total: 0, mode: 'simulate', items: [] };
-const SUBMISSIONS_FALLBACK: SubmissionsResponse = { total: 0, page: 1, per_page: 20, items: [] };
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -78,11 +77,11 @@ function urls(path: string): string[] {
   ])];
 }
 
-async function fetchWithTimeout(url: string, ms = 8000): Promise<Response> {
+async function fetchWithTimeout(url: string, headers: HeadersInit, ms = 8000): Promise<Response> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
-    return await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+    return await fetch(url, { cache: 'no-store', signal: ctrl.signal, headers });
   } finally {
     clearTimeout(t);
   }
@@ -94,14 +93,18 @@ async function fetchWithTimeout(url: string, ms = 8000): Promise<Response> {
 
 export async function getAggregatorQueue(aggregator = ''): Promise<AggregatorQueueResponse> {
   const params = aggregator ? `?aggregator=${encodeURIComponent(aggregator)}` : '';
+  const headers = await getAuthHeaders();
   for (const url of urls(`/api/aggregator/queue${params}`)) {
+    let res: Response | undefined;
     try {
-      const res = await fetchWithTimeout(url);
-      if (res.ok) return res.json();
+      res = await fetchWithTimeout(url, headers);
     } catch { /* try next */ }
+    if (res) {
+      if (!res.ok) throw new Error(`Aggregator queue request failed (HTTP ${res.status})`);
+      return res.json();
+    }
   }
-  console.warn('[aggregator] queue API unreachable — using fallback');
-  return QUEUE_FALLBACK;
+  throw new Error('Aggregator queue API unreachable');
 }
 
 export async function getAggregatorSubmissions(
@@ -113,24 +116,30 @@ export async function getAggregatorSubmissions(
   const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
   if (status) params.set('status', status);
   if (aggregator) params.set('aggregator', aggregator);
+  const headers = await getAuthHeaders();
   for (const url of urls(`/api/aggregator/submissions?${params}`)) {
+    let res: Response | undefined;
     try {
-      const res = await fetchWithTimeout(url);
-      if (res.ok) return res.json();
+      res = await fetchWithTimeout(url, headers);
     } catch { /* try next */ }
+    if (res) {
+      if (!res.ok) throw new Error(`Aggregator history request failed (HTTP ${res.status})`);
+      return res.json();
+    }
   }
-  console.warn('[aggregator] submissions API unreachable — using fallback');
-  return SUBMISSIONS_FALLBACK;
+  throw new Error('Aggregator history API unreachable');
 }
 
 // ---------------------------------------------------------------------------
 // Client-side mutation functions (called from Client Components)
 // ---------------------------------------------------------------------------
 
-export async function submitSingleVisit(visitId: number): Promise<VisitSubmitResult> {
-  const endpoint = `http://127.0.0.1:8000/api/aggregator/submit/${visitId}`;
+type ApiFetch = (url: string, init?: RequestInit) => Promise<Response>;
+
+export async function submitSingleVisit(visitId: number, apiFetch: ApiFetch): Promise<VisitSubmitResult> {
+  const endpoint = `/api/aggregator/submit/${visitId}`;
   try {
-    const res = await fetch(endpoint, { method: 'POST', cache: 'no-store' });
+    const res = await apiFetch(endpoint, { method: 'POST', cache: 'no-store' });
     if (res.ok) return res.json();
     const err = await res.json().catch(() => ({}));
     return { success: false, visit_id: visitId, transaction_id: '', status: 'Error', message: err.detail ?? `HTTP ${res.status}` };
@@ -139,10 +148,10 @@ export async function submitSingleVisit(visitId: number): Promise<VisitSubmitRes
   }
 }
 
-export async function batchSubmit(limit = 50): Promise<BatchSubmitResult> {
-  const endpoint = `http://127.0.0.1:8000/api/aggregator/batch?limit=${limit}`;
+export async function batchSubmit(limit: number, apiFetch: ApiFetch): Promise<BatchSubmitResult> {
+  const endpoint = `/api/aggregator/batch?limit=${limit}`;
   try {
-    const res = await fetch(endpoint, { method: 'POST', cache: 'no-store' });
+    const res = await apiFetch(endpoint, { method: 'POST', cache: 'no-store' });
     if (res.ok) return res.json();
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail ?? `HTTP ${res.status}`);
@@ -151,10 +160,10 @@ export async function batchSubmit(limit = 50): Promise<BatchSubmitResult> {
   }
 }
 
-export async function retrySubmission(submissionId: number): Promise<VisitSubmitResult> {
-  const endpoint = `http://127.0.0.1:8000/api/aggregator/submissions/${submissionId}/retry`;
+export async function retrySubmission(submissionId: number, apiFetch: ApiFetch): Promise<VisitSubmitResult> {
+  const endpoint = `/api/aggregator/submissions/${submissionId}/retry`;
   try {
-    const res = await fetch(endpoint, { method: 'POST', cache: 'no-store' });
+    const res = await apiFetch(endpoint, { method: 'POST', cache: 'no-store' });
     if (res.ok) return res.json();
     const err = await res.json().catch(() => ({}));
     return { success: false, visit_id: 0, transaction_id: '', status: 'Error', message: err.detail ?? `HTTP ${res.status}` };

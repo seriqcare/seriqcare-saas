@@ -23,6 +23,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db.database import get_db
+from db.models import User
+from backend.auth.dependencies import AgencyScope, get_agency_scope, get_current_user
 from backend.schemas import (
     AggregatorQueueItem,
     AggregatorQueueResponse,
@@ -36,6 +38,15 @@ from backend.services.timezone import now_eastern_naive
 
 router = APIRouter()
 _agg_log = logging.getLogger("seriqcare.aggregator")
+
+
+def get_aggregator_scope(
+    scope: AgencyScope = Depends(get_agency_scope),
+    current_user: User = Depends(get_current_user),
+) -> AgencyScope:
+    if current_user.role != "super_admin" and current_user.agency_id is None:
+        raise HTTPException(status_code=403, detail="Agency membership required.")
+    return scope
 
 # ---------------------------------------------------------------------------
 # Shared SQL: fetch full visit row needed by the payload builder
@@ -71,12 +82,12 @@ _VISIT_SQL = """
     JOIN  care.visit_evv              ev ON ev.visit_id     = v.id
     LEFT JOIN care.visit_billing      vb ON vb.visit_id     = v.id
     LEFT JOIN care.visit_integration_status vi ON vi.visit_id = v.id
-    JOIN  care.employees              e  ON v.employee_id   = e.id
-    JOIN  care.clients                c  ON v.client_id     = c.id
+    JOIN  care.employees              e  ON v.employee_id   = e.id AND e.agency_id = v.agency_id
+    JOIN  care.clients                c  ON v.client_id     = c.id AND c.agency_id = v.agency_id
     JOIN  care.service_codes          sc ON v.service_code_id = sc.id
-    LEFT JOIN care.providers          p  ON p.id = (
-        SELECT TOP 1 id FROM care.providers WHERE is_active = 1
-    )
+    JOIN care.agencies a ON a.id = v.agency_id
+    LEFT JOIN care.providers p ON p.provider_id_sandata = a.sandata_provider_id
+                              AND p.agency_id = v.agency_id AND p.is_active = 1
     WHERE v.id = :visit_id AND v.visit_cancelled = 0
 """
 
@@ -136,11 +147,14 @@ def _update_sandata_status(
     )
 
 
-def _do_submit(visit_id: int, db: Session) -> VisitSubmitResponse:
+def _do_submit(visit_id: int, db: Session, scope: AgencyScope) -> VisitSubmitResponse:
     """Shared logic: build Sandata payload → call API → record result."""
     now_utc = now_eastern_naive()
 
-    row = db.execute(text(_VISIT_SQL), {"visit_id": visit_id}).fetchone()
+    row = db.execute(
+        text(f"{_VISIT_SQL} AND {scope.sql_filter('v')}"),
+        scope.bind({"visit_id": visit_id}),
+    ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail=f"Visit {visit_id} not found.")
 
@@ -165,7 +179,12 @@ def _do_submit(visit_id: int, db: Session) -> VisitSubmitResponse:
     if not provider_id_sandata:
         raise HTTPException(
             status_code=422,
-            detail="Visit cannot be submitted — provider Sandata ID (provider_id_sandata) is not configured.",
+            detail="Visit cannot be submitted — an active provider matching the agency's Sandata ID is not configured.",
+        )
+    if svc.is_live() and not svc.live_provider_matches(provider_id_sandata):
+        raise HTTPException(
+            status_code=422,
+            detail="Visit cannot be submitted — live Sandata credentials are not configured for this agency's provider.",
         )
 
     transaction_id = f"TXN-{now_utc.strftime('%Y%m%d')}-{visit_id:05d}"
@@ -281,7 +300,7 @@ def _do_submit(visit_id: int, db: Session) -> VisitSubmitResponse:
 # GET /api/aggregator/mode
 # ---------------------------------------------------------------------------
 @router.get("/mode")
-def get_mode():
+def get_mode(scope: AgencyScope = Depends(get_aggregator_scope)):
     """Return current Sandata submission mode."""
     return {"mode": "live" if svc.is_live() else "simulate"}
 
@@ -293,6 +312,7 @@ def get_mode():
 def get_queue(
     aggregator: str = Query(default="", description="'sandata' or 'hhax'. Defaults to 'sandata'."),
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_aggregator_scope),
 ):
     """
     Returns visits ready for aggregator submission.
@@ -322,8 +342,8 @@ def get_queue(
                 COUNT(s.id)                                        AS prior_attempts,
                 MAX(CONVERT(VARCHAR(19), s.submitted_at, 120))     AS last_attempt_at
             FROM care.visits v
-            JOIN care.clients   c        ON v.client_id        = c.id
-            JOIN care.employees e        ON v.employee_id      = e.id
+            JOIN care.clients   c        ON v.client_id        = c.id AND c.agency_id = v.agency_id
+            JOIN care.employees e        ON v.employee_id      = e.id AND e.agency_id = v.agency_id
             JOIN care.service_codes sc   ON v.service_code_id  = sc.id
             JOIN care.visit_evv          ev ON ev.visit_id     = v.id
             JOIN care.visit_integration_status vi ON vi.visit_id = v.id
@@ -332,6 +352,7 @@ def get_queue(
                 ON s.visit_id = v.id AND s.aggregator = '{agg_name}'
             WHERE {status_col} = 'Ready'
               AND v.visit_cancelled = 0
+              AND {scope.sql_filter('v')}
               AND NOT EXISTS (
                   SELECT 1 FROM care.aggregator_submissions sub
                   WHERE sub.visit_id = v.id
@@ -346,7 +367,7 @@ def get_queue(
                 ev.evv_status, vb.approval_status,
                 vi.sandata_status, vi.hhax_status
             ORDER BY v.service_date DESC, v.id
-        """)).fetchall()
+        """), scope.bind({})).fetchall()
 
         items = [
             AggregatorQueueItem(
@@ -385,12 +406,13 @@ def get_submissions(
     status: str = "",
     aggregator: str = Query(default="", description="Filter by aggregator: 'sandata' or 'hhax'."),
     db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_aggregator_scope),
 ):
     """Paged history of all aggregator submissions with visit details."""
     try:
         offset = (page - 1) * per_page
-        where = "WHERE 1=1"
-        params: dict = {"limit": per_page, "offset": offset}
+        where = f"WHERE {scope.sql_filter('v')}"
+        params: dict = scope.bind({"limit": per_page, "offset": offset})
 
         if status:
             where += " AND s.status = :status"
@@ -404,6 +426,9 @@ def get_submissions(
             text(f"""
                 SELECT COUNT(*) AS cnt
                 FROM care.aggregator_submissions s
+                JOIN care.visits v ON s.visit_id = v.id
+                JOIN care.clients c ON c.id = v.client_id AND c.agency_id = v.agency_id
+                JOIN care.employees e ON e.id = v.employee_id AND e.agency_id = v.agency_id
                 {where}
             """),
             params,
@@ -427,8 +452,8 @@ def get_submissions(
                     s.response_code                                AS transaction_id
                 FROM care.aggregator_submissions s
                 JOIN care.visits   v ON s.visit_id   = v.id
-                JOIN care.clients  c ON v.client_id  = c.id
-                JOIN care.employees e ON v.employee_id = e.id
+                JOIN care.clients  c ON v.client_id  = c.id AND c.agency_id = v.agency_id
+                JOIN care.employees e ON v.employee_id = e.id AND e.agency_id = v.agency_id
                 {where}
                 ORDER BY s.submitted_at DESC
                 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
@@ -464,10 +489,10 @@ def get_submissions(
 # POST /api/aggregator/submit/{visit_id}
 # ---------------------------------------------------------------------------
 @router.post("/submit/{visit_id}", response_model=VisitSubmitResponse)
-def submit_visit(visit_id: int, db: Session = Depends(get_db)):
+def submit_visit(visit_id: int, db: Session = Depends(get_db), scope: AgencyScope = Depends(get_aggregator_scope)):
     """Submit a single visit to Sandata."""
     try:
-        return _do_submit(visit_id, db)
+        return _do_submit(visit_id, db, scope)
     except HTTPException:
         raise
     except Exception as exc:
@@ -479,7 +504,7 @@ def submit_visit(visit_id: int, db: Session = Depends(get_db)):
 # POST /api/aggregator/batch
 # ---------------------------------------------------------------------------
 @router.post("/batch", response_model=BatchSubmitResponse)
-def batch_submit(limit: int = 50, db: Session = Depends(get_db)):
+def batch_submit(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db), scope: AgencyScope = Depends(get_aggregator_scope)):
     """
     Submit all queued visits (Verified + no prior Accepted submission).
     Processes up to `limit` visits per call (default 50, max 200).
@@ -487,12 +512,15 @@ def batch_submit(limit: int = 50, db: Session = Depends(get_db)):
     limit = min(limit, 200)
 
     try:
-        queue_rows = db.execute(text("""
+        queue_rows = db.execute(text(f"""
             SELECT v.id
             FROM care.visits v
             JOIN care.visit_integration_status vi ON vi.visit_id = v.id
+            JOIN care.clients c ON c.id = v.client_id AND c.agency_id = v.agency_id
+            JOIN care.employees e ON e.id = v.employee_id AND e.agency_id = v.agency_id
             WHERE vi.sandata_status = 'Ready'
               AND v.visit_cancelled = 0
+              AND {scope.sql_filter('v')}
               AND NOT EXISTS (
                   SELECT 1 FROM care.aggregator_submissions sub
                   WHERE sub.visit_id  = v.id
@@ -500,7 +528,7 @@ def batch_submit(limit: int = 50, db: Session = Depends(get_db)):
                     AND sub.status     = 'Accepted'
               )
             ORDER BY v.service_date ASC, v.id ASC
-        """)).fetchall()
+        """), scope.bind({})).fetchall()
 
         visit_ids = [r.id for r in queue_rows[:limit]]
         total_queued = len(visit_ids)
@@ -510,7 +538,7 @@ def batch_submit(limit: int = 50, db: Session = Depends(get_db)):
 
         for vid in visit_ids:
             try:
-                res = _do_submit(vid, db)
+                res = _do_submit(vid, db, scope)
                 results.append(res)
                 if res.status == "Accepted":
                     accepted += 1
@@ -547,19 +575,26 @@ def batch_submit(limit: int = 50, db: Session = Depends(get_db)):
 # POST /api/aggregator/submissions/{id}/retry
 # ---------------------------------------------------------------------------
 @router.post("/submissions/{submission_id}/retry", response_model=VisitSubmitResponse)
-def retry_submission(submission_id: int, db: Session = Depends(get_db)):
+def retry_submission(submission_id: int, db: Session = Depends(get_db), scope: AgencyScope = Depends(get_aggregator_scope)):
     """
     Re-submit a rejected or failed aggregator submission.
     A new submission record is created — the old record is not modified.
     """
     try:
         sub = db.execute(
-            text("SELECT visit_id, status FROM care.aggregator_submissions WHERE id = :id"),
-            {"id": submission_id},
+            text(f"""SELECT s.visit_id, s.status, s.aggregator FROM care.aggregator_submissions s
+                     JOIN care.visits v ON v.id = s.visit_id
+                     JOIN care.clients c ON c.id = v.client_id AND c.agency_id = v.agency_id
+                     JOIN care.employees e ON e.id = v.employee_id AND e.agency_id = v.agency_id
+                     WHERE s.id = :id AND {scope.sql_filter('v')}"""),
+            scope.bind({"id": submission_id}),
         ).fetchone()
 
         if not sub:
             raise HTTPException(status_code=404, detail=f"Submission {submission_id} not found.")
+
+        if (sub.aggregator or "").lower() != "sandata":
+            raise HTTPException(status_code=422, detail="Only Sandata submissions can be retried here.")
 
         if sub.status == "Accepted":
             raise HTTPException(
@@ -567,7 +602,7 @@ def retry_submission(submission_id: int, db: Session = Depends(get_db)):
                 detail="Submission was already accepted — retry not needed.",
             )
 
-        return _do_submit(sub.visit_id, db)
+        return _do_submit(sub.visit_id, db, scope)
 
     except HTTPException:
         raise

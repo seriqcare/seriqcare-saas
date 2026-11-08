@@ -82,7 +82,19 @@ Roles are stored in `care.users.role` and embedded in the JWT. The backend reads
 | Agency Admin | `agency_admin` | Full agency access, same as coordinator | NULL |
 | Super Admin | `super_admin` | SeriqCare internal — crosses all agencies; authenticates via Entra ID only | NULL |
 
-All roles are **agency-scoped**: `agency_id` is read from the JWT, not from the request body. A user can only see data belonging to their own agency.
+Agency-scoped access uses the authenticated user's agency membership, not an agency supplied in the request. Super admins have cross-agency access. Tenant isolation is not yet enforced consistently across all endpoints; see the security review before relying on it in production.
+
+AgencyScope rejects non-super-admin users without an agency. Billing claim grouping, bulk generation, status updates, and caregiver payroll endpoints require agency staff or super-admin authentication and use the owning agency. Schedules use the client's agency and require the assigned caregiver to belong to that same agency, including for super-admin operations. Client statistics are restricted to the selected agency and client filters.
+
+Payroll pay groups and rates are currently shared globally: the payroll settings endpoint can modify shared groups and employee settings across agencies. Caregiver payroll endpoint isolation does not isolate those shared settings; do not rely on payroll configuration as tenant-isolated until that separate issue is addressed.
+
+Client details, insurance, authorizations, visits, updates, and care-task management require coordinator, agency-admin, or super-admin access. Non-super-admin staff must belong to the client's agency. Caregivers may update task completion only for an active client in their agency with a non-cancelled schedule assigned to their employee record.
+
+Mobile clock-in requires an employee and agency linked to the authenticated user, a non-cancelled schedule assigned to that employee, and matching agency ownership for the schedule, client, and employee. Clock-out and mobile visit history are restricted to that employee and agency.
+
+Aggregator queue, history, submissions, batch operations, retries, and mode require coordinator, agency-admin, or super-admin access. Staff without an agency are denied; super admins have cross-agency access. Submitted visits and their clients and employees must belong to the same agency. Sandata submissions require an active provider owned by the visit's agency whose provider ID matches `care.agencies.sandata_provider_id`; missing or mismatched configuration blocks submission. Sandata retry does not submit HHAeXchange records.
+
+Live Sandata credentials are configured globally, not per agency. A live submission is blocked unless `SANDATA_PROVIDER_ID` matches the visit agency's provider ID. Supporting multiple live provider credentials requires separate configuration. Simulator mode sends visit data to the configured simulator service; it is not necessarily local.
 
 ---
 

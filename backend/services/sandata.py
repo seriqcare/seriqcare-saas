@@ -45,6 +45,11 @@ def is_live() -> bool:
     return _MODE == "live"
 
 
+def live_provider_matches(provider_id: str) -> bool:
+    """The live API credentials are currently configured for one provider."""
+    return bool(_PROVIDER_ID) and _PROVIDER_ID == provider_id
+
+
 # ---------------------------------------------------------------------------
 # Payload builder
 # ---------------------------------------------------------------------------

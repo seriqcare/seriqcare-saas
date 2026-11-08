@@ -180,12 +180,6 @@ const FALLBACK: ClientsResponse = {
   items: [],
 };
 
-const CARE_TASKS_FALLBACK: ClientCareTasksResponse = {
-  client_id: 0,
-  date: '',
-  items: [],
-};
-
 async function fetchWithTimeout(url: string, ms = 8000, headers?: HeadersInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
@@ -309,44 +303,44 @@ export async function getClientVisits(
 export async function updateClient(
   id: number,
   payload: Record<string, string>,
+  apiFetch: (url: string, init?: RequestInit) => Promise<Response>,
 ): Promise<{ success: boolean; message: string }> {
-  const urls = [...new Set([
-    `${API}/api/clients/${id}`,
-    `${API.replace('localhost', '127.0.0.1')}/api/clients/${id}`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        cache: 'no-store',
-      });
-      if (res.ok) return res.json();
-    } catch { /* try next */ }
+  const res = await apiFetch(`/api/clients/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(typeof error.detail === 'string' ? error.detail : `Client update failed (HTTP ${res.status})`);
   }
-  console.warn('[clients] PUT API unreachable');
-  return { success: false, message: 'API unreachable' };
+  return res.json();
 }
 
 export async function getClientCareTasks(clientId: number): Promise<ClientCareTasksResponse> {
+  const headers = await getAuthHeaders();
   const urls = [...new Set([
     `${API}/api/clients/${clientId}/care-tasks`,
     `${API.replace('localhost', '127.0.0.1')}/api/clients/${clientId}/care-tasks`,
   ])];
   for (const url of urls) {
     try {
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(url, { headers, cache: 'no-store' });
       if (res.ok) return res.json();
-    } catch { /* try next */ }
+      throw new Error(`Failed to load care tasks (HTTP ${res.status})`);
+    } catch (error) {
+      if (url === urls[urls.length - 1]) throw error;
+    }
   }
-  return { ...CARE_TASKS_FALLBACK, client_id: clientId };
+  throw new Error('Unable to load care tasks.');
 }
 
 export async function saveClientCareTasks(
   clientId: number,
   items: ClientCareTaskInput[],
 ): Promise<ClientCareTasksResponse> {
+  const authHeaders = await getAuthHeaders();
   const urls = [...new Set([
     `${API}/api/clients/${clientId}/care-tasks`,
     `${API.replace('localhost', '127.0.0.1')}/api/clients/${clientId}/care-tasks`,
@@ -355,7 +349,7 @@ export async function saveClientCareTasks(
     try {
       const res = await fetch(url, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
         body: JSON.stringify({ items }),
         cache: 'no-store',
       });
@@ -368,7 +362,7 @@ export async function saveClientCareTasks(
       }
     }
   }
-  return { ...CARE_TASKS_FALLBACK, client_id: clientId };
+  throw new Error('Unable to save care tasks.');
 }
 
 export async function setClientCareTaskCompletion(

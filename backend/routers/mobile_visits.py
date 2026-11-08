@@ -122,8 +122,8 @@ def clock_in(
 
     Idempotent: returns the existing visit_id if already clocked in for this schedule.
     """
-    if current_user.employee_id is None:
-        raise HTTPException(status_code=403, detail="User is not linked to an employee record")
+    if current_user.employee_id is None or current_user.agency_id is None:
+        raise HTTPException(status_code=403, detail="User is not linked to an employee and agency")
 
     schedule = db.execute(
         text("""
@@ -136,14 +136,19 @@ def clock_in(
                     SELECT TOP 1 sa.id
                     FROM   care.service_authorizations sa
                     WHERE  sa.client_id       = s.client_id
+                      AND  sa.agency_id       = s.agency_id
                       AND  sa.service_code_id = s.service_code_id
                       AND  sa.is_active       = 1
                     ORDER  BY sa.service_end_date DESC
                 ) AS auth_id
             FROM care.schedules s
+            JOIN care.clients c ON c.id = s.client_id AND c.agency_id = s.agency_id
+            JOIN care.employees e ON e.id = s.employee_id AND e.agency_id = s.agency_id
             WHERE s.id = :sid
+              AND s.employee_id = :employee_id AND s.agency_id = :agency_id
+              AND s.status <> 'Cancelled'
         """),
-        {"sid": req.schedule_id},
+        {"sid": req.schedule_id, "employee_id": current_user.employee_id, "agency_id": current_user.agency_id},
     ).fetchone()
 
     if schedule is None:
@@ -156,10 +161,12 @@ def clock_in(
             FROM   care.visits    v
             JOIN   care.visit_evv ev ON ev.visit_id = v.id
             WHERE  v.schedule_id         = :sid
+              AND  v.employee_id         = :employee_id
+              AND  v.agency_id           = :agency_id
               AND  ev.call_out_datetime  IS NULL
               AND  v.visit_cancelled     = 0
         """),
-        {"sid": req.schedule_id},
+        {"sid": req.schedule_id, "employee_id": current_user.employee_id, "agency_id": current_user.agency_id},
     ).fetchone()
 
     if existing:
@@ -279,16 +286,22 @@ def clock_out(
     care.visit_billing, then calls validate_and_gate() which sets evv_status
     ('Verified') and advances the appropriate aggregator column to 'Ready'.
     """
+    if current_user.employee_id is None or current_user.agency_id is None:
+        raise HTTPException(status_code=403, detail="User is not linked to an employee and agency")
     visit = db.execute(
         text("""
             SELECT v.id, ev.call_in_datetime
             FROM   care.visits    v
             JOIN   care.visit_evv ev ON ev.visit_id = v.id
+            JOIN   care.clients c ON c.id = v.client_id AND c.agency_id = v.agency_id
+            JOIN   care.employees e ON e.id = v.employee_id AND e.agency_id = v.agency_id
             WHERE  v.id                  = :vid
+              AND  v.employee_id         = :employee_id
+              AND  v.agency_id           = :agency_id
               AND  ev.call_out_datetime  IS NULL
               AND  v.visit_cancelled     = 0
         """),
-        {"vid": visit_id},
+        {"vid": visit_id, "employee_id": current_user.employee_id, "agency_id": current_user.agency_id},
     ).fetchone()
 
     if visit is None:
@@ -392,8 +405,8 @@ def get_visit_history(
     db:           Session = Depends(get_db),
 ):
     """Return past visits for the authenticated caregiver, newest first."""
-    if current_user.employee_id is None:
-        return []
+    if current_user.employee_id is None or current_user.agency_id is None:
+        raise HTTPException(status_code=403, detail="User is not linked to an employee and agency")
 
     since = date.today() - timedelta(days=days)
 
@@ -410,11 +423,12 @@ def get_visit_history(
                 vb.approval_status,
                 sc.hcpcs_code
             FROM  care.visits         v
-            JOIN  care.clients        c  ON c.id  = v.client_id
+            JOIN  care.clients        c  ON c.id  = v.client_id AND c.agency_id = v.agency_id
             JOIN  care.service_codes  sc ON sc.id = v.service_code_id
             LEFT JOIN care.visit_evv     ev ON ev.visit_id = v.id
             LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
             WHERE v.employee_id    = :emp_id
+              AND v.agency_id      = :agency_id
               AND v.service_date  >= :since
               AND v.visit_cancelled = 0
             ORDER BY v.service_date DESC, v.id DESC
@@ -422,6 +436,7 @@ def get_visit_history(
         """),
         {
             "emp_id": current_user.employee_id,
+            "agency_id": current_user.agency_id,
             "since":  since,
             "skip":   skip,
             "limit":  limit,

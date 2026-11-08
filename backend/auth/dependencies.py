@@ -151,6 +151,8 @@ class AgencyScope:
 
     def __init__(self, user: User, db: Optional[Session] = None) -> None:
         self._user = user
+        if user.role != "super_admin" and user.agency_id is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agency membership required")
         # super_admin has no agency restriction; everyone else is scoped to their agency
         self.agency_id: Optional[int] = None if user.role == "super_admin" else user.agency_id
         # Resolve agency tier so endpoints can gate aggregator calls
@@ -177,7 +179,7 @@ class AgencyScope:
     @property
     def is_global(self) -> bool:
         """True for super_admin — queries must not filter by agency."""
-        return self.agency_id is None
+        return self._user.role == "super_admin"
 
     def sql_filter(self, alias: str = "") -> str:
         """

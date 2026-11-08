@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useAuth } from '@/components/auth-context';
 import {
   submitSingleVisit,
   batchSubmit,
@@ -76,6 +77,7 @@ function SingleSubmitBtn({
 }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<VisitSubmitResult | null>(null);
+  const { apiFetch } = useAuth();
 
   // HHAeXchange submission not yet implemented
   if (aggregator === 'hhax') {
@@ -88,7 +90,7 @@ function SingleSubmitBtn({
 
   async function handle() {
     setState('loading');
-    const r = await submitSingleVisit(item.visit_id);
+    const r = await submitSingleVisit(item.visit_id, apiFetch);
     setResult(r);
     setState(r.success ? 'done' : 'error');
     onDone(r);
@@ -124,12 +126,13 @@ function SingleSubmitBtn({
 // ---------------------------------------------------------------------------
 function RetryBtn({ id, onDone }: { id: number; onDone: (r: VisitSubmitResult) => void }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
+  const { apiFetch } = useAuth();
 
   async function handle() {
     setState('loading');
-    const r = await retrySubmission(id);
+    const r = await retrySubmission(id, apiFetch);
     onDone(r);
-    setState('done');
+    setState(r.success ? 'done' : 'idle');
   }
 
   if (state === 'loading') return <span style={{ fontSize: 11, color: 'var(--muted)' }}>Retrying…</span>;
@@ -157,6 +160,7 @@ interface Props {
 }
 
 export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal, mode, aggregator }: Props) {
+  const { apiFetch } = useAuth();
   const [tab, setTab] = useState<'queue' | 'history'>('queue');
   const [queue, setQueue] = useState(initialQueue);
   const [history, setHistory] = useState(initialHistory);
@@ -185,7 +189,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
     setBatchState('loading');
     setBatchError('');
     try {
-      const r = await batchSubmit(50);
+      const r = await batchSubmit(50, apiFetch);
       setBatchResult(r);
       setBatchState('done');
       const accepted = r.results.filter(x => x.success).map(x => x.visit_id);
