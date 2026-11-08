@@ -3,7 +3,7 @@ import { ProtectedLayout } from '@/components/protected-layout';
 import { getScheduleWeek, getServiceCodes, type ScheduleEntry } from '@/lib/queries/schedule';
 import { getClients } from '@/lib/queries/clients';
 import { getCaregivers } from '@/lib/queries/caregivers';
-import { QuerySearchInput } from '@/components/query-search-input';
+// import { QuerySearchInput } from '@/components/query-search-input';
 import { NewShiftButton } from '@/components/new-shift-modal';
 
 export const dynamic = 'force-dynamic';
@@ -216,7 +216,11 @@ export default async function SchedulePage({
           <p className="page-subtitle">Weekly caregiver assignments · open shift coverage · real-time status</p>
         </div>
         <div className="top-actions">
-          <QuerySearchInput placeholder="Search client, caregiver, or service..." />
+          {search && (
+            <Link href={buildQuery({ mode, date: isoDate(anchorDate), client: filterClient, caregiver: filterCaregiver })} className="btn secondary">
+              Clear search: {search}
+            </Link>
+          )}
           {filterCaregiver && (
             <Link href={buildQuery({ mode, date: isoDate(anchorDate), search, client: filterClient })} className="btn secondary">
               Clear caregiver filter

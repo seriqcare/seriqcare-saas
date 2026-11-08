@@ -105,6 +105,31 @@ button, input, select { font: inherit; }
 .page-subtitle { font-size: 12px; color: var(--muted); margin: 0; }
 .top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
+.directory-topbar { min-height: 56px; }
+.directory-topbar > div:first-child { min-width: 0; min-height: 48px; flex-shrink: 0; max-width: 40%; }
+.directory-topbar .page-subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.directory-topbar .top-actions { min-width: 0; height: 56px; flex-wrap: nowrap; overflow-x: auto; }
+.directory-topbar .top-actions > * { flex-shrink: 0; }
+.schedule-heading-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.schedule-heading-details > .btn { height: 24px; padding: 0 8px; font-size: 11px; flex-shrink: 0; white-space: nowrap; }
+.schedule-heading-details .page-subtitle { min-width: 0; }
+.schedule-board-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 18px; }
+.schedule-panels { display: grid; grid-template-rows: 360px minmax(0, 1fr); gap: 14px; min-width: 0; height: 600px; }
+.card.schedule-board, .card.schedule-visits, .card.client-directory, .card.caregiver-directory { padding: 0; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.card.client-directory, .card.caregiver-directory { height: 600px; }
+.client-directory-content, .caregiver-directory-content, .schedule-visits-content { flex: 1; min-height: 0; overflow: auto; }
+.schedule-visits > .pagination { flex-shrink: 0; }
+.schedule-board-content { flex: 1; min-height: 0; overflow: auto; }
+.schedule-board-content > div { min-height: 100%; }
+.schedule-date-controls { display: flex; gap: 5px; align-items: center; }
+.schedule-date-controls .btn { display: flex; align-items: center; justify-content: center; width: 34px; padding: 0; font-size: 18px; }
+.schedule-date-controls .date-chip { white-space: nowrap; }
+
 .search, .filter, .date-chip, .profile-chip, .btn {
   height: 34px;
   border-radius: 4px;
@@ -724,6 +749,10 @@ tbody tr:hover { background: var(--surface-soft); }
   .main-area { padding: 14px; }
   .topbar { flex-direction: column; }
   .search { min-width: 100%; width: 100%; }
+  .directory-topbar { min-height: 118px; }
+  .directory-topbar > div:first-child { max-width: 100%; }
+  .directory-topbar .top-actions { width: 100%; }
+  .directory-topbar .search { min-width: 240px; width: 240px; }
   .summary-row { grid-template-columns: 1fr; }
   .summary-card { border-right: none; border-bottom: 1px solid var(--line); }
   .summary-card:last-child { border-bottom: none; }

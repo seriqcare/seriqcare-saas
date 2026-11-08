@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { getVisits, type VisitEntry } from '@/lib/queries/timesheets';
 import { VisitSubmitBtn } from '@/components/visit-submit-btn';
-import { QuerySearchInput } from '@/components/query-search-input';
 import { QueryTabs } from '@/components/query-tabs';
 import { VisitPeriodSelect } from '@/components/visit-period-select';
 import { EscCodePanel } from '@/components/esc-code-panel';
@@ -191,7 +190,11 @@ export default async function VisitsPage({
           <p className="page-subtitle">{tabCfg.subtitle}</p>
         </div>
         <div className="top-actions">
-          <QuerySearchInput placeholder="Search visit ID, client, or caregiver..." />
+          {search && (
+            <Link href={buildPageHref('', status, week, aggregator, 1)} className="btn secondary" style={{ display: 'flex', alignItems: 'center' }}>
+              Clear search: {search}
+            </Link>
+          )}
           <VisitPeriodSelect current={week} />
           <button className="btn secondary">Export</button>
         </div>

@@ -36,7 +36,7 @@ export default async function ClientsPage({
   return (
     <ProtectedLayout>
       {/* ── Topbar ─────────────────────────────────────── */}
-      <div className="topbar">
+      <div className="topbar directory-topbar">
         <div>
           <h1 className="page-title">Clients</h1>
           <p className="page-subtitle">
@@ -57,10 +57,10 @@ export default async function ClientsPage({
       </div>
 
       {/* ── Main content ───────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 296px', gap: 16, alignItems: 'start' }}>
 
         {/* Client directory table */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card client-directory">
           <div style={{ padding: '14px 18px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <div style={{ marginBottom: 12 }}>
               <div>
@@ -70,7 +70,7 @@ export default async function ClientsPage({
             </div>
           </div>
 
-          <div className="table-scroll">
+          <div className="table-scroll client-directory-content" role="region" aria-label="Client directory" tabIndex={0}>
             <table>
               <thead>
                 <tr>

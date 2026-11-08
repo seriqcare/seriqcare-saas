@@ -60,7 +60,7 @@ export default async function CaregiversPage({
     <ProtectedLayout>
 
       {/* ── Topbar ─────────────────────────────────────── */}
-      <div className="topbar">
+      <div className="topbar directory-topbar">
         <div>
           <h1 className="page-title">Caregivers</h1>
           <p className="page-subtitle">
@@ -84,10 +84,10 @@ export default async function CaregiversPage({
       </div>
 
       {/* ── Main layout ────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 296px', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 296px', gap: 16, alignItems: 'start' }}>
 
         {/* Table card */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card caregiver-directory">
           <div style={{ padding: '14px 18px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
@@ -106,7 +106,7 @@ export default async function CaregiversPage({
             />
           </div>
 
-          <div className="table-scroll">
+          <div className="table-scroll caregiver-directory-content" role="region" aria-label="Caregiver directory" tabIndex={0}>
             <table>
               <thead>
                 <tr>
