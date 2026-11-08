@@ -24,6 +24,13 @@ class PriorityItem(BaseModel):
     type: str
 
 
+class CaregiverUtilization(BaseModel):
+    employee_id: int
+    name: str
+    scheduled_hours: float
+    utilization_pct: float
+
+
 class DashboardMetrics(BaseModel):
     activeClients: int
     carePlansExpiringSoon: int
@@ -76,6 +83,7 @@ class ClientSummary(BaseModel):
     primary_caregiver: Optional[str]
     next_visit: Optional[str]
     care_plan_status: str
+    care_plan_review_date: Optional[str] = None
 
 
 class ClientDetail(BaseModel):

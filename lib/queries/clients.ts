@@ -26,6 +26,7 @@ export interface ClientSummary {
   primary_caregiver: string | null;
   next_visit: string | null;
   care_plan_status: string;
+  care_plan_review_date: string | null;
 }
 
 export interface ClientDetail {

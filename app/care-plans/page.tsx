@@ -5,27 +5,8 @@ import { getClients } from '@/lib/queries/clients';
 
 export const dynamic = 'force-dynamic';
 
-/* ── Mock care plan detail data (enriches live client list) ── */
-const MOCK_PLANS: Record<string, {
-  coordinator: string;
-  physician: string;
-  level: string;
-  reviewed: string;
-  next_review: string;
-  goals: number;
-  goals_met: number;
-}> = {
-  default: { coordinator: 'Michelle Okafor', physician: 'Dr. Angela Torres', level: 'Moderate Support', reviewed: '2025-11-14', next_review: '2026-05-14', goals: 3, goals_met: 2 },
-};
-
-const PLAN_STATUS_CLS: Record<string, string> = {
-  Current:  'active',
-  Overdue:  'flag',
-  Pending:  'pending',
-};
-
 function planCls(s: string) {
-  if (s === 'Current') return 'active';
+  if (s === 'Up to date') return 'active';
   if (s === 'Overdue') return 'flag';
   if (s.startsWith('Review')) return 'pending';
   return '';
@@ -41,24 +22,14 @@ function initials(name: string) {
   return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 }
 
-/* Static authorized services lookup */
-const SERVICE_CODES: Record<string, string> = {
-  'W7076': 'Companion Services',
-  'W7060': 'In-Home & Community Support',
-  'W9494': 'Respite (Unlicensed)',
-  'W9495': 'Respite Day',
-  'S5130': 'Homemaker',
-  'W9783': 'Community Support AAW',
-};
-
 export default async function CarePlansPage() {
   const data = await getClients(1, 100);
   const { items } = data;
 
   const overdue     = items.filter((c) => c.care_plan_status === 'Overdue');
   const dueReview   = items.filter((c) => c.care_plan_status.startsWith('Review'));
-  const current     = items.filter((c) => c.care_plan_status === 'Current');
-  const pending     = items.filter((c) => c.care_plan_status === 'Pending' || c.status === 'Pending');
+  const current     = items.filter((c) => c.care_plan_status === 'Up to date');
+  const pending     = items.filter((c) => c.care_plan_status === 'Pending');
 
   return (
     <ProtectedLayout>
@@ -161,7 +132,6 @@ export default async function CarePlansPage() {
                       </td>
                     </tr>
                   ) : items.map((c) => {
-                    const plan = MOCK_PLANS.default;
                     return (
                       <tr key={c.id}>
                         <td>
@@ -181,28 +151,14 @@ export default async function CarePlansPage() {
                             : <span style={{ color: '#c0c8d0' }}>Not assigned</span>
                           }
                         </td>
-                        <td style={{ fontSize: 12 }}>
-                          <div style={{ fontWeight: 600 }}>{plan.coordinator}</div>
-                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>Care Coordinator</div>
-                        </td>
-                        <td>
-                          <span style={{ fontSize: 11, background: '#eef5fb', border: '1px solid #c8dff0', color: '#2567a4', padding: '3px 8px', borderRadius: 4, fontWeight: 600 }}>
-                            {plan.level}
-                          </span>
-                        </td>
-                        <td style={{ fontSize: 12, color: 'var(--muted)' }}>{plan.reviewed}</td>
-                        <td style={{ fontSize: 12, fontWeight: 600 }}>{plan.next_review}</td>
+                        <td style={{ color: 'var(--muted)' }}>Not available</td>
+                        <td style={{ color: 'var(--muted)' }}>Not available</td>
+                        <td style={{ color: 'var(--muted)' }}>Not available</td>
+                        <td style={{ fontSize: 12, fontWeight: 600 }}>{c.care_plan_review_date ?? 'Not set'}</td>
                         <td>
                           <span className={`status ${planCls(c.care_plan_status)}`}>{c.care_plan_status}</span>
                         </td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <div style={{ width: 36, height: 6, background: '#e9eef4', borderRadius: 99, overflow: 'hidden' }}>
-                              <div style={{ height: '100%', width: `${Math.round((plan.goals_met / plan.goals) * 100)}%`, background: '#35693c', borderRadius: 99 }} />
-                            </div>
-                            <span style={{ fontSize: 11, color: 'var(--muted)' }}>{plan.goals_met}/{plan.goals}</span>
-                          </div>
-                        </td>
+                        <td style={{ color: 'var(--muted)' }}>Not available</td>
                         <td>
                           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                             <Link href={`/clients/${c.id}`} className="action-link">View</Link>
@@ -218,7 +174,7 @@ export default async function CarePlansPage() {
             </div>
 
             <div className="pagination" style={{ padding: '10px 18px' }}>
-              <div>Showing 1–{items.length} of {items.length} care plans</div>
+              <div>Showing {items.length === 0 ? 0 : 1}–{items.length} of {data.total} clients</div>
               <div className="page-controls">
                 <div className="page-btn">‹</div>
                 <div className="page-btn active">1</div>
@@ -227,24 +183,6 @@ export default async function CarePlansPage() {
             </div>
           </div>
 
-          {/* Authorized Services Reference */}
-          <div className="card">
-            <div className="card-header" style={{ marginBottom: 14 }}>
-              <div>
-                <div className="card-title">PA ODP Authorized Service Codes</div>
-                <div className="card-subtitle">HCPCS codes eligible for EVV under the Consolidated Waiver</div>
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-              {Object.entries(SERVICE_CODES).map(([code, desc]) => (
-                <div key={code} style={{ padding: '12px 14px', border: '1px solid var(--line-soft)', borderRadius: 6, background: 'var(--surface-soft)' }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#2567a4', marginBottom: 4 }}>{code}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.4 }}>{desc}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>Place of Service: 12 / 99</div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* ── Right sidebar ───────────────────────────── */}
@@ -294,7 +232,7 @@ export default async function CarePlansPage() {
                 <div className="alert-item">
                   <div className="alert-dot info" />
                   <div className="alert-body">
-                    <div className="alert-title">All plans current</div>
+                    <div className="alert-title">No upcoming reviews</div>
                     <div className="alert-sub">No reviews due in the next 30 days</div>
                   </div>
                 </div>

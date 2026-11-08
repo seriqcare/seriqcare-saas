@@ -10,10 +10,48 @@ from sqlalchemy.orm import Session
 
 from db.database import get_db
 from backend.auth.dependencies import AgencyScope, get_agency_scope
-from backend.schemas import DashboardMetrics, PriorityItem, VisitByDay
+from backend.schemas import CaregiverUtilization, DashboardMetrics, PriorityItem, VisitByDay
 from backend.services.timezone import SQLSERVER_LOCAL_DATE_EXPR, SQLSERVER_LOCAL_WEEK_START_DATE_EXPR
 
 router = APIRouter()
+
+_UTILIZATION_SQL = f"""
+    SELECT e.id, e.first_name + ' ' + e.last_name AS name,
+           COALESCE(SUM(CASE WHEN s.scheduled_end > s.scheduled_start
+               THEN DATEDIFF(MINUTE, s.scheduled_start, s.scheduled_end)
+               ELSE 0 END), 0) / 60.0 AS scheduled_hours
+    FROM care.employees e
+    LEFT JOIN care.schedules s ON s.employee_id = e.id
+        AND s.agency_id = e.agency_id
+        AND s.status <> 'Cancelled'
+        AND s.scheduled_start >= {SQLSERVER_LOCAL_WEEK_START_DATE_EXPR}
+        AND s.scheduled_start < DATEADD(DAY, 7, {SQLSERVER_LOCAL_WEEK_START_DATE_EXPR})
+        AND EXISTS (SELECT 1 FROM care.clients c
+                    WHERE c.id = s.client_id AND c.agency_id = s.agency_id)
+    WHERE e.is_active = 1 AND {{agency_filter}}
+    GROUP BY e.id, e.first_name, e.last_name
+    ORDER BY scheduled_hours DESC, e.first_name, e.last_name, e.id
+"""
+
+
+@router.get("/caregiver-utilization", response_model=list[CaregiverUtilization])
+def get_caregiver_utilization(
+    db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
+):
+    rows = db.execute(
+        text(_UTILIZATION_SQL.format(agency_filter=scope.sql_filter("e"))),
+        scope.bind({}),
+    ).fetchall()
+    return [
+        CaregiverUtilization(
+            employee_id=row.id,
+            name=row.name,
+            scheduled_hours=round(float(row.scheduled_hours), 2),
+            utilization_pct=round(float(row.scheduled_hours) / 40 * 100, 1),
+        )
+        for row in rows
+    ]
 
 
 @router.get("/metrics", response_model=DashboardMetrics)

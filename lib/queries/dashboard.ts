@@ -53,6 +53,32 @@ export interface DashboardMetrics {
   priorityQueue: PriorityItem[];
 }
 
+export interface CaregiverUtilization {
+  employee_id: number;
+  name: string;
+  scheduled_hours: number;
+  utilization_pct: number;
+}
+
+export async function getCaregiverUtilization(): Promise<CaregiverUtilization[]> {
+  const headers = await getAuthHeaders();
+  for (const base of buildApiBases()) {
+    let response: Response;
+    try {
+      response = await fetch(`${base}/api/dashboard/caregiver-utilization`, {
+        headers,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      });
+    } catch {
+      continue;
+    }
+    if (!response.ok) throw new Error(`Caregiver utilization request failed (HTTP ${response.status})`);
+    return response.json();
+  }
+  throw new Error('Caregiver utilization service is unavailable');
+}
+
 async function fetchWithTimeout(url: string, ms = 8000, headers?: HeadersInit): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);

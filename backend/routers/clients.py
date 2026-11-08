@@ -785,6 +785,7 @@ def get_clients(
                        AND s.status NOT IN ('Cancelled', 'Completed')
                      ORDER BY s.scheduled_start ASC
                     ) AS next_visit,
+                    CONVERT(VARCHAR, TRY_CAST(c.care_plan_review_date AS DATE), 23) AS care_plan_review_date,
                     -- care plan status
                     CASE
                         WHEN c.care_plan_review_date IS NULL THEN 'No Plan'
@@ -824,6 +825,7 @@ def get_clients(
                 primary_caregiver=r.primary_caregiver,
                 next_visit=r.next_visit,
                 care_plan_status=str(r.care_plan_status),
+                care_plan_review_date=r.care_plan_review_date,
             )
             for r in client_rows
         ]

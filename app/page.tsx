@@ -1,6 +1,7 @@
 import { ProtectedLayout } from '@/components/protected-layout';
 import { HeaderUser } from '@/components/topbar';
-import { getDashboardMetrics, type DashboardMetrics } from '@/lib/queries/dashboard';
+import { DashboardEvvPanels } from '@/components/dashboard-evv-panels';
+import { getCaregiverUtilization, getDashboardMetrics } from '@/lib/queries/dashboard';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,44 +9,17 @@ export const dynamic = 'force-dynamic';
 function fmt(n: number) { return n.toLocaleString('en-US'); }
 function fmtHours(n: number) { return n.toFixed(0); }
 
-function buildAlerts(m: DashboardMetrics) {
-  const alerts: { dot: string; title: string; sub: string }[] = [];
-  if (m.urgentExceptions > 0)
-    alerts.push({ dot: 'urgent', title: `${m.urgentExceptions} Urgent EVV Exception${m.urgentExceptions > 1 ? 's' : ''}`, sub: 'Require immediate review before aggregator submission' });
-  if (m.rejectedSubmissions > 0)
-    alerts.push({ dot: 'urgent', title: `${m.rejectedSubmissions} Rejected Aggregator Submission${m.rejectedSubmissions > 1 ? 's' : ''}`, sub: 'Sandata returned ESC errors — resubmission needed' });
-  if (m.evvIncomplete > 0)
-    alerts.push({ dot: 'warning', title: `${m.evvIncomplete} Incomplete EVV Record${m.evvIncomplete > 1 ? 's' : ''}`, sub: 'Missing GPS, clock-in, or clock-out data for billing' });
-  if (m.carePlansExpiringSoon > 0)
-    alerts.push({ dot: 'warning', title: `${m.carePlansExpiringSoon} Care Plan${m.carePlansExpiringSoon > 1 ? 's' : ''} Expiring Soon`, sub: 'Authorization renewal required before service continues' });
-  if (m.pendingSubmissions > 0)
-    alerts.push({ dot: 'info', title: `${m.pendingSubmissions} Visits Pending Sandata Submission`, sub: 'Ready to be submitted to the aggregator' });
-  if (m.openShifts > 0)
-    alerts.push({ dot: 'info', title: `${m.openShifts} Open Shift${m.openShifts > 1 ? 's' : ''} This Week`, sub: 'Coverage needed — assign caregivers to avoid gaps' });
-  if (alerts.length === 0)
-    alerts.push({ dot: 'info', title: 'All systems normal', sub: 'No active compliance alerts at this time' });
-  return alerts;
-}
-
-/* Static caregiver utilization (placeholder — Phase 6 will make this live) */
-const UTIL_DATA = [
-  { name: 'Sarah Mills',    pct: 92 },
-  { name: 'Linda Brooks',   pct: 78 },
-  { name: 'Rachel Dunn',    pct: 85 },
-  { name: 'Angela Reese',   pct: 64 },
-  { name: 'Natalie Ford',   pct: 71 },
-];
-
 export default async function DashboardPage() {
-  const m = await getDashboardMetrics();
+  const [m, utilizationResult] = await Promise.all([
+    getDashboardMetrics(),
+    getCaregiverUtilization().then(
+      data => ({ data, error: null }),
+      error => ({ data: null, error: error instanceof Error ? error.message : 'Unable to load caregiver utilization' }),
+    ),
+  ]);
 
   /* Activity chart — normalise bar heights */
   const maxCount = Math.max(...m.visitsByDay.map((d) => d.count), 1);
-
-  /* EVV breakdown total */
-  const evvTotal = m.evvProcessed + m.evvVerified + m.evvIncomplete + m.evvOmit || 1;
-
-  const alerts = buildAlerts(m);
 
   return (
     <ProtectedLayout>
@@ -165,71 +139,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Row 3 — EVV breakdown + Compliance alerts ── */}
-      <div className="dash-row">
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <div className="card-title">EVV Status Breakdown</div>
-              <div className="card-subtitle">Visit records by aggregator verification status</div>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{evvTotal - 1 > 0 ? `${evvTotal} total` : ''}</div>
-          </div>
-          <div className="evv-rows">
-            {[
-              { label: 'Processed',  count: m.evvProcessed,  cls: 'processed' },
-              { label: 'Verified',   count: m.evvVerified,   cls: 'verified' },
-              { label: 'Incomplete', count: m.evvIncomplete, cls: 'incomplete' },
-              { label: 'Omit',       count: m.evvOmit,       cls: 'omit' },
-            ].map(({ label, count, cls }) => (
-              <div key={label} className="evv-row">
-                <div className="evv-row-label">{label}</div>
-                <div className="evv-track">
-                  <div
-                    className={`evv-fill ${cls}`}
-                    style={{ width: `${Math.round((count / evvTotal) * 100)}%` }}
-                  />
-                </div>
-                <div className="evv-row-count">{count}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <div className="note-item">
-              <div className="note-title">Pending Submission</div>
-              <div className="note-sub">{m.pendingSubmissions} visits ready for Sandata</div>
-            </div>
-            <div className="note-item">
-              <div className="note-title">Rejected</div>
-              <div className="note-sub" style={{ color: m.rejectedSubmissions > 0 ? '#d56b6b' : undefined }}>
-                {m.rejectedSubmissions} returned with ESC errors
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <div className="card-title">Compliance Alerts</div>
-              <div className="card-subtitle">PA-DHS EVV, authorizations, and scheduling</div>
-            </div>
-          </div>
-          <div className="alert-list">
-            {alerts.map((a, i) => (
-              <div key={i} className="alert-item">
-                <div className={`alert-dot ${a.dot}`} />
-                <div className="alert-body">
-                  <div className="alert-title">{a.title}</div>
-                  <div className="alert-sub">{a.sub}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Row 4 — Revenue pipeline (placeholder) + Caregiver utilization ── */}
+      {/* ── Row 3 — Revenue pipeline (placeholder) + Caregiver utilization ── */}
       <div className="dash-row">
         <div className="card">
           <div className="card-header">
@@ -253,22 +163,29 @@ export default async function DashboardPage() {
           <div className="card-header">
             <div>
               <div className="card-title">Caregiver Utilization</div>
-              <div className="card-subtitle">Weekly scheduled hours vs. capacity</div>
+              <div className="card-subtitle">Scheduled hours this week vs. 40-hour capacity</div>
             </div>
           </div>
+          {utilizationResult.error ? (
+            <div role="alert">{utilizationResult.error}</div>
+          ) : utilizationResult.data?.length === 0 ? (
+            <div className="coming-soon-wrap">No active caregivers in this agency.</div>
+          ) : (
           <div className="util-rows">
-            {UTIL_DATA.map(({ name, pct }) => (
-              <div key={name} className="util-row">
+            {utilizationResult.data?.map(({ employee_id, name, scheduled_hours, utilization_pct }) => (
+              <div key={employee_id} className="util-row" title={`${scheduled_hours} scheduled hours`}>
                 <div className="util-name">{name}</div>
                 <div className="util-track">
-                  <div className="util-fill" style={{ width: `${pct}%` }} />
+                  <div className="util-fill" style={{ width: `${Math.min(utilization_pct, 100)}%` }} />
                 </div>
-                <div className="util-pct">{pct}%</div>
+                <div className="util-pct">{utilization_pct}%</div>
               </div>
             ))}
           </div>
+          )}
         </div>
       </div>
+      <DashboardEvvPanels metrics={m} />
     </ProtectedLayout>
   );
 }
