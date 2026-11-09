@@ -35,6 +35,7 @@ type AuthContextType = {
 // ---------------------------------------------------------------------------
 const AUTH_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_TIMEOUT_MS ?? 4500);
 const AUTH_BOOT_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_AUTH_BOOT_TIMEOUT_MS ?? 6000);
+const REFRESH_CHECK_MS = 30 * 1000;
 const PROACTIVE_REFRESH_MS = 8.5 * 60 * 1000; // 8.5 min — refresh before 10-min AT expires
 
 function trimSlash(url: string): string {
@@ -55,6 +56,15 @@ function buildApiBases(currentHost?: string): string[] {
 
   const expanded = preferred.flatMap((base) => {
     const normalized = trimSlash(base);
+    // Keep local API cookies on the browser's hostname (SameSite=Lax).
+    const loopbackHosts = ['localhost', '127.0.0.1'];
+    if (currentHost && loopbackHosts.includes(currentHost)) {
+      const parsed = new URL(normalized);
+      if (loopbackHosts.includes(parsed.hostname)) {
+        parsed.hostname = currentHost;
+        return [trimSlash(parsed.toString())];
+      }
+    }
     return normalized.includes('localhost')
       ? [normalized, normalized.replace('localhost', '127.0.0.1')]
       : [normalized];
@@ -140,6 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // In-memory access token — never touches localStorage or a JS-readable cookie
   const accessTokenRef = useRef<string | null>(null);
   const activeBaseRef = useRef(apiBases[0]);
+  const lastRefreshAtRef = useRef(0);
 
   // Deduplication: if multiple callers hit 401 simultaneously, share one refresh call
   const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
@@ -170,7 +181,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
-        if (!res.ok) {
+        if (!res.ok && res.status !== 401) {
+          // Server errors and rate limits do not invalidate the refresh session.
+          return null;
+        }
+        if (res.status === 401) {
           // Definitive server rejection — session is truly invalid
           accessTokenRef.current = null;
           clearPresenceCookie();
@@ -191,6 +206,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           agency_aggregator: data.agency_aggregator ?? null,
         };
         accessTokenRef.current = data.access_token;
+        lastRefreshAtRef.current = Date.now();
         setPresenceCookie();
         setTokenCookie(data.access_token);
         setUser(nextUser);
@@ -200,7 +216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Network/timeout error — backend unreachable, preserve existing state.
         // Don't clear the token or user; the AT may still be valid for a bit longer.
-        // If the AT is truly expired, the next apiFetch 401 will handle the redirect.
+        // Retry renewal later; only a refresh 401 confirms the session is invalid.
         return null;
       }
     })();
@@ -229,6 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           activeBaseRef.current = evt.data.base;
         }
         accessTokenRef.current = evt.data.token;
+        lastRefreshAtRef.current = Date.now();
         setTokenCookie(evt.data.token);
         setPresenceCookie();
         setUser(evt.data.user);
@@ -244,8 +261,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Proactive token refresh — keeps the session alive without waiting for a 401.
   useEffect(() => {
-    const id = setInterval(() => { silentRefresh(); }, PROACTIVE_REFRESH_MS);
-    return () => clearInterval(id);
+    const refreshIfDue = () => {
+      const hasSession = accessTokenRef.current || document.cookie.includes(`${SESSION_PRESENCE}=`);
+      if (hasSession && Date.now() - lastRefreshAtRef.current >= PROACTIVE_REFRESH_MS) {
+        void silentRefresh();
+      }
+    };
+    // Once renewal is due, retry transient failures every 30 seconds.
+    const id = setInterval(refreshIfDue, REFRESH_CHECK_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshIfDue();
+    };
+    window.addEventListener('online', refreshIfDue);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('online', refreshIfDue);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [silentRefresh]);
 
   // Client-side route guard (backup to middleware).
@@ -280,10 +313,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (res.status === 401) {
       const newToken = await silentRefresh();
       if (!newToken) {
-        // Refresh failed — sign out
-        accessTokenRef.current = null;
-        setUser(null);
-        router.replace('/login');
+        // Preserve the session on timeouts/server errors for a later retry.
+        if (!accessTokenRef.current && !document.cookie.includes(`${SESSION_PRESENCE}=`)) {
+          router.replace('/login');
+        }
         return res;
       }
       headers.set('Authorization', `Bearer ${newToken}`);
@@ -346,6 +379,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('Unable to save the session API endpoint.', error);
       }
       accessTokenRef.current = data.access_token;
+      lastRefreshAtRef.current = Date.now();
       setPresenceCookie();
       setTokenCookie(data.access_token);
       setUser({

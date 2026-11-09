@@ -200,7 +200,7 @@ test('401 refresh retries reads but not writes', async () => {
       return require(name);
     };
     const globals = {
-      fetch, process, Headers, setTimeout, clearTimeout, console,
+      fetch, process, URL, Headers, setTimeout, clearTimeout, console,
       window: { location: { hostname: 'localhost' } }, document: { cookie: '' },
     };
     const { AuthProvider } = compile('components\\auth-context.tsx', globals, customRequire);
