@@ -4,7 +4,7 @@ import { Turnstile } from '@marsidev/react-turnstile';
 import type { TurnstileInstance } from '@marsidev/react-turnstile';
 import { forwardRef } from 'react';
 
-const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '';
+const SITE_KEY = process.env.TURNSTILE_SITE_KEY ?? '';
 
 interface TurnstileWidgetProps {
   onSuccess: (token: string) => void;

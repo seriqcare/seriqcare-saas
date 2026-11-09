@@ -160,7 +160,9 @@ export default function LoginPage() {
             onError={() => setCfToken('')}
           />
           {phase === 'connecting' && (
-            <p role="status">Connecting… Waking the server and database may take a couple of minutes.</p>
+            <p role="status" style={{ color: '#166534', fontSize: 13, margin: '8px 0 0' }}>
+              Connecting… Waking the server and database may take a couple of minutes.
+            </p>
           )}
 
           <button

@@ -1007,7 +1007,9 @@ function MobileLoginScreen() {
             </div>
           )}
           {phase === 'connecting' && (
-            <div role="status" style={{ marginTop: 10 }}>Connecting… Waking the server and database may take a couple of minutes.</div>
+            <div role="status" style={{ marginTop: 10, color: '#166534', fontSize: 13 }}>
+              Connecting… Waking the server and database may take a couple of minutes.
+            </div>
           )}
 
           <button
