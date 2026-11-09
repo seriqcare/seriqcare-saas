@@ -171,8 +171,8 @@ engine = create_engine(
     pool_recycle=1800,
     pool_size=_env_int("DB_POOL_SIZE", 5),
     max_overflow=_env_int("DB_MAX_OVERFLOW", 10),
-    pool_timeout=_env_int("DB_POOL_TIMEOUT", 30),
-    connect_args={"timeout": _env_int("DB_CONNECT_TIMEOUT", 30)},
+    pool_timeout=_env_int("DB_POOL_TIMEOUT", 10),
+    connect_args={"timeout": _env_int("DB_CONNECT_TIMEOUT", 10)},
 )
 
 

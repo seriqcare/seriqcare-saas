@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-context';
+import { useLoginFlow } from '@/components/use-login-flow';
 
 type TabId = 'schedule' | 'clock' | 'tasks' | 'profile';
 
@@ -949,20 +950,20 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function MobileLoginScreen() {
-  const { signIn, isLoading } = useAuth();
+  const { isLoading } = useAuth();
+  const { phase, submit } = useLoginFlow();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const busy = phase !== 'idle';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password) return;
-    setBusy(true);
+    if (busy || !username.trim() || !password) return;
     setError('');
-    const result = await signIn(username.trim(), password);
-    setBusy(false);
+    const result = await submit(username.trim(), password);
+    if (!result) return;
     if (!result.ok) setError(result.error);
   };
 
@@ -1005,6 +1006,9 @@ function MobileLoginScreen() {
               {error}
             </div>
           )}
+          {phase === 'connecting' && (
+            <div role="status" style={{ marginTop: 10 }}>Connecting… Waking the server and database may take a couple of minutes.</div>
+          )}
 
           <button
             type="submit"
@@ -1022,7 +1026,7 @@ function MobileLoginScreen() {
               cursor: busy || !username.trim() || !password ? 'default' : 'pointer',
             }}
           >
-            {busy ? 'Signing In...' : 'Sign In'}
+            {phase === 'connecting' ? 'Connecting…' : phase === 'signing-in' ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
       </div>

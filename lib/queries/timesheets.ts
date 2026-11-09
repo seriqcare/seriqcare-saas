@@ -101,29 +101,24 @@ export async function fixVisit(
   clockIn = '',
   clockOut = '',
 ): Promise<{ success: boolean; message: string }> {
-  const urls = [...new Set([
-    `${API}/api/visits/${id}/fix`,
-    `${API.replace('localhost', '127.0.0.1')}/api/visits/${id}/fix`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'PATCH',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reason,
-          notes: notes || undefined,
-          clock_in:  clockIn  || undefined,
-          clock_out: clockOut || undefined,
-        }),
-      });
-      if (res.ok) return res.json();
-      const err = await res.json().catch(() => ({}));
-      return { success: false, message: err.detail ?? `HTTP ${res.status}` };
-    } catch { /* try next */ }
+  try {
+    const res = await fetch(`${API}/api/visits/${id}/fix`, {
+      method: 'PATCH',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reason,
+        notes: notes || undefined,
+        clock_in:  clockIn  || undefined,
+        clock_out: clockOut || undefined,
+      }),
+    });
+    if (res.ok) return res.json();
+    const err = await res.json().catch(() => ({}));
+    return { success: false, message: err.detail ?? `HTTP ${res.status}` };
+  } catch {
+    return { success: false, message: 'API unreachable' };
   }
-  return { success: false, message: 'API unreachable' };
 }
 
 // ─── Universal timesheet dataset (richer than VisitEntry) ─────────────────────
@@ -231,45 +226,35 @@ export async function getTimesheetEntries(
 
 export async function submitVisit(id: number): Promise<VisitSubmitResult> {
   const authHeaders = await getAuthHeaders();
-  const urls = [...new Set([
-    `${API}/api/visits/${id}/submit`,
-    `${API.replace('localhost', '127.0.0.1')}/api/visits/${id}/submit`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        cache: 'no-store',
-        headers: authHeaders,
-      });
-      if (res.ok) return res.json();
-      const err = await res.json().catch(() => ({}));
-      return { success: false, visit_id: id, transaction_id: '', status: 'Error', message: err.detail ?? `HTTP ${res.status}` };
-    } catch { /* try next */ }
+  try {
+    const res = await fetch(`${API}/api/visits/${id}/submit`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: authHeaders,
+    });
+    if (res.ok) return res.json();
+    const err = await res.json().catch(() => ({}));
+    return { success: false, visit_id: id, transaction_id: '', status: 'Error', message: err.detail ?? `HTTP ${res.status}` };
+  } catch {
+    return { success: false, visit_id: id, transaction_id: '', status: 'Error', message: 'API unreachable' };
   }
-  return { success: false, visit_id: id, transaction_id: '', status: 'Error', message: 'API unreachable' };
 }
 
 export async function updateTimesheet(
   visitId: number,
   payload: TimesheetUpdateRequest,
 ): Promise<{ success: boolean; message: string }> {
-  const urls = [...new Set([
-    `${API}/api/timesheets/${visitId}`,
-    `${API.replace('localhost', '127.0.0.1')}/api/timesheets/${visitId}`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'PATCH',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return res.json();
-      const err = await res.json().catch(() => ({}));
-      return { success: false, message: err.detail ?? `HTTP ${res.status}` };
-    } catch { /* try next */ }
+  try {
+    const res = await fetch(`${API}/api/timesheets/${visitId}`, {
+      method: 'PATCH',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return res.json();
+    const err = await res.json().catch(() => ({}));
+    return { success: false, message: err.detail ?? `HTTP ${res.status}` };
+  } catch {
+    return { success: false, message: 'API unreachable' };
   }
-  return { success: false, message: 'API unreachable' };
 }

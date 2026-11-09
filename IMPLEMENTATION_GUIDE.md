@@ -1367,8 +1367,8 @@ All variables are defined in `.env` at project root. Never hardcode any of these
 | `ODBC_DRIVER` | "ODBC Driver 17 for SQL Server" |
 | `DB_POOL_SIZE` | Connection pool size |
 | `DB_MAX_OVERFLOW` | Pool overflow limit |
-| `DB_POOL_TIMEOUT` | Pool checkout timeout (seconds) |
-| `DB_KEEPALIVE_INTERVAL` | Keepalive ping interval (seconds) |
+| `DB_POOL_TIMEOUT` | Pool checkout timeout in seconds (default: 10) |
+| `DB_CONNECT_TIMEOUT` | ODBC connection timeout in seconds (default: 10) |
 
 ### Authentication
 | Variable | Description |
@@ -1380,6 +1380,30 @@ All variables are defined in `.env` at project root. Never hardcode any of these
 | `DEV_NO_HASH_AUTH` | Skip bcrypt check in dev (never true in prod) |
 | `DEV_PASSWORD` | Dev mode bypass password |
 | `SUPER_ADMIN_PASSWORD` | Initial super admin seed password |
+
+### Cold-start readiness
+
+`GET /api/health` is a liveness check and does not access the database.
+`GET /api/ready` checks the existing SQLAlchemy pool with `SELECT 1`; responses
+are not cached. Pool connections use pre-ping, and there is no scheduled database
+keep-alive; existing authenticated polling continues. The connection and pool
+timeouts default to 10 seconds each, and authentication token acquisition or pool
+checkout can add to connection time. Ensure `NEXT_PUBLIC_API_BASE_URL` points to
+the backend and Flutter's `API_BASE_URL` dart-define points to the same API.
+
+Login retries failed readiness checks after five seconds, with a 12-second
+request timeout and a 150-second overall deadline. HTTP errors other than
+502, 503, and 504 stop the check immediately. Login and other writes are not
+automatically replayed; retry a failed write explicitly.
+
+To test a cold start, allow the backend/database to become idle or use a
+controlled unavailable database in a non-production environment. Open either
+login screen and submit once: the connecting message should appear while the
+backend wakes, then change to signing in after readiness succeeds. If the
+database remains unavailable for 150 seconds the form is restored with the
+unavailable message. Check the browser network panel for repeated
+`GET /api/ready` requests and at most one `POST /api/auth/login` per submission.
+Do not record credentials in logs or network captures.
 
 ### API & CORS
 | Variable | Description |

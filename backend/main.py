@@ -11,7 +11,6 @@ Serves:
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import logging.handlers
 import os
@@ -63,32 +62,13 @@ if _ENV != "prod":
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import text
 
 from backend.middleware.api_access_log import api_access_log_middleware
-from db.database import engine, test_connection
+from db.database import engine
 
-log = logging.getLogger("seriqcare.keepalive")
-
-# ---------------------------------------------------------------------------
-# DB keepalive — pings every 4 min to prevent Azure LB from dropping idle
-# TCP connections in the SQLAlchemy pool (Azure drops idle conns at ~4 min).
-# Runs as a background asyncio task inside the existing Render process;
-# zero additional cost since the process is already running 24/7.
-# ---------------------------------------------------------------------------
-_KEEPALIVE_INTERVAL = int(os.getenv("DB_KEEPALIVE_INTERVAL", "240"))  # seconds
-
-
-async def _db_keepalive_loop() -> None:
-    while True:
-        await asyncio.sleep(_KEEPALIVE_INTERVAL)
-        try:
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-        except Exception as exc:
-            # Log but never crash — pool_pre_ping handles reconnect on next request
-            log.warning("[keepalive] ping failed: %s", exc)
+log = logging.getLogger("seriqcare.readiness")
 from backend.routers import (
     dashboard, clients, schedule, visits, caregivers,
     auth, aggregator, timesheets, settings, billing,
@@ -114,18 +94,8 @@ async def lifespan(app: FastAPI):
         f"Service Principal: {'enabled' if use_service_principal else 'disabled'} | "
         f"Key Vault: {'enabled' if use_key_vault else 'disabled'}"
     )
-    ok = test_connection()
-    if ok:
-        print("[startup] Database connection OK")
-    else:
-        print("[startup] WARNING: Database connection FAILED — check .env settings")
-
-    keepalive_task = asyncio.create_task(_db_keepalive_loop())
-    print(f"[startup] DB keepalive started (interval: {_KEEPALIVE_INTERVAL}s)")
-
     yield
 
-    keepalive_task.cancel()
     print("[shutdown] SeriqCare backend stopped")
 
 
@@ -160,6 +130,23 @@ app.add_middleware(
 )
 
 app.middleware("http")(api_access_log_middleware)
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/ready")
+def readiness():
+    headers = {"Cache-Control": "no-store, no-cache, max-age=0", "Pragma": "no-cache"}
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        log.warning("Database readiness check failed", exc_info=True)
+        return JSONResponse(status_code=503, content={"detail": "Service not ready."}, headers=headers)
+    return JSONResponse(content={"status": "ready"}, headers=headers)
 
 # ---------------------------------------------------------------------------
 # Routers — Portal (web)

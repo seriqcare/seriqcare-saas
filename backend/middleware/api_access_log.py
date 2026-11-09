@@ -45,6 +45,8 @@ _SKIP_PATHS = frozenset([
     "/openapi.json",
     "/redoc",
     "/favicon.ico",
+    "/api/health",
+    "/api/ready",
 ])
 
 

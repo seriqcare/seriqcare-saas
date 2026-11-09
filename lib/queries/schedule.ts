@@ -159,31 +159,18 @@ export async function createSchedule(
   payload: ScheduleCreateRequest,
   token?: string,
 ): Promise<ScheduleCreateResponse> {
-  const urls = [...new Set([
-    `${API}/api/schedule`,
-    `${API.replace('localhost', '127.0.0.1')}/api/schedule`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(payload),
-        cache: 'no-store',
-      });
-      if (res.ok) return res.json();
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail ?? `HTTP ${res.status}`);
-    } catch (error) {
-      if (url === urls[urls.length - 1]) {
-        throw error;
-      }
-    }
-  }
-  throw new Error('Unable to save schedule.');
+  const res = await fetch(`${API}/api/schedule`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  if (res.ok) return res.json();
+  const err = await res.json().catch(() => ({}));
+  throw new Error(err.detail ?? `HTTP ${res.status}`);
 }
 
 export async function updateSchedule(
@@ -191,29 +178,16 @@ export async function updateSchedule(
   payload: ScheduleUpdateRequest,
   token?: string,
 ): Promise<ScheduleUpdateResponse> {
-  const urls = [...new Set([
-    `${API}/api/schedule/${scheduleId}`,
-    `${API.replace('localhost', '127.0.0.1')}/api/schedule/${scheduleId}`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(payload),
-        cache: 'no-store',
-      });
-      if (res.ok) return res.json();
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail ?? `HTTP ${res.status}`);
-    } catch (error) {
-      if (url === urls[urls.length - 1]) {
-        throw error;
-      }
-    }
-  }
-  throw new Error('Unable to update schedule.');
+  const res = await fetch(`${API}/api/schedule/${scheduleId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  if (res.ok) return res.json();
+  const err = await res.json().catch(() => ({}));
+  throw new Error(err.detail ?? `HTTP ${res.status}`);
 }

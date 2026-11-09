@@ -327,21 +327,20 @@ export async function generateClaim(
   visitIds: number[],
   payer: string,
 ): Promise<{ success: boolean; claim?: BillingClaimResponse; message: string }> {
-  for (const url of apiUrls('/api/billing/generate')) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visit_ids: visitIds, payer }),
-      });
-      if (res.ok) {
-        const claim: BillingClaimResponse = await res.json();
-        return { success: true, claim, message: `Claim #${claim.id} created` };
-      }
-      const err = await res.json().catch(() => ({}));
-      return { success: false, message: (err as { detail?: string }).detail ?? `HTTP ${res.status}` };
-    } catch { /* try next */ }
+  try {
+    const res = await fetch(`${API}/api/billing/generate`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visit_ids: visitIds, payer }),
+    });
+    if (res.ok) {
+      const claim: BillingClaimResponse = await res.json();
+      return { success: true, claim, message: `Claim #${claim.id} created` };
+    }
+    const err = await res.json().catch(() => ({}));
+    return { success: false, message: (err as { detail?: string }).detail ?? `HTTP ${res.status}` };
+  } catch {
+    return { success: false, message: 'API unreachable' };
   }
-  return { success: false, message: 'API unreachable' };
 }

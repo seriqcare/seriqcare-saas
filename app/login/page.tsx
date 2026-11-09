@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/components/auth-context';
+import { useLoginFlow } from '@/components/use-login-flow';
 import TurnstileWidget, { turnstileEnabled } from '@/components/turnstile-widget';
 import type { TurnstileInstance } from '@marsidev/react-turnstile';
 
@@ -12,13 +13,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const { phase, submit } = useLoginFlow();
+  const submitting = phase !== 'idle';
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const [countdown, setCountdown] = useState(0);
   const [cfToken, setCfToken] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const turnstileRef = useRef<TurnstileInstance>(null);
-  const { signIn, isLoading } = useAuth();
+  const { isLoading } = useAuth();
   const router = useRouter();
 
   // Countdown ticker while locked
@@ -42,7 +44,7 @@ export default function LoginPage() {
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isLocked) return;
+    if (isLocked || submitting) return;
 
     if (turnstileEnabled && !cfToken) {
       setError('Please complete the security check.');
@@ -50,23 +52,20 @@ export default function LoginPage() {
     }
 
     setError('');
-    setSubmitting(true);
-
-    const result = await signIn(email, password, cfToken || undefined);
+    const result = await submit(email, password, cfToken || undefined);
+    if (!result) return;
 
     if (!result.ok) {
       if (result.retryAfter) {
         setLockedUntil(Date.now() + result.retryAfter * 1000);
       }
       setError(result.error);
-      setSubmitting(false);
       // Reset Turnstile so user can get a fresh token for the next attempt
       setCfToken('');
       turnstileRef.current?.reset();
       return;
     }
 
-    setSubmitting(false);
     router.replace('/');
   };
 
@@ -160,6 +159,9 @@ export default function LoginPage() {
             onExpire={() => setCfToken('')}
             onError={() => setCfToken('')}
           />
+          {phase === 'connecting' && (
+            <p role="status">Connecting… Waking the server and database may take a couple of minutes.</p>
+          )}
 
           <button
             className="btn"
@@ -170,7 +172,7 @@ export default function LoginPage() {
             {isLocked
               ? `Locked — try again in ${fmtCountdown(countdown)}`
               : submitting
-              ? 'Signing in…'
+              ? phase === 'connecting' ? 'Connecting…' : 'Signing in…'
               : 'Sign in'}
           </button>
         </form>

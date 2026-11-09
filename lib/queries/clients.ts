@@ -342,28 +342,15 @@ export async function saveClientCareTasks(
   items: ClientCareTaskInput[],
 ): Promise<ClientCareTasksResponse> {
   const authHeaders = await getAuthHeaders();
-  const urls = [...new Set([
-    `${API}/api/clients/${clientId}/care-tasks`,
-    `${API.replace('localhost', '127.0.0.1')}/api/clients/${clientId}/care-tasks`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'PATCH',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items }),
-        cache: 'no-store',
-      });
-      if (res.ok) return res.json();
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail ?? `HTTP ${res.status}`);
-    } catch (error) {
-      if (url === urls[urls.length - 1]) {
-        throw error;
-      }
-    }
-  }
-  throw new Error('Unable to save care tasks.');
+  const res = await fetch(`${API}/api/clients/${clientId}/care-tasks`, {
+    method: 'PATCH',
+    headers: { ...authHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+    cache: 'no-store',
+  });
+  if (res.ok) return res.json();
+  const err = await res.json().catch(() => ({}));
+  throw new Error(err.detail ?? `HTTP ${res.status}`);
 }
 
 export async function setClientCareTaskCompletion(
@@ -372,29 +359,16 @@ export async function setClientCareTaskCompletion(
   payload: ClientCareTaskCompletionRequest,
   token: string,
 ): Promise<ClientCareTaskCompletionResponse> {
-  const urls = [...new Set([
-    `${API}/api/clients/${clientId}/care-tasks/${taskId}/completion`,
-    `${API.replace('localhost', '127.0.0.1')}/api/clients/${clientId}/care-tasks/${taskId}/completion`,
-  ])];
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-        cache: 'no-store',
-      });
-      if (res.ok) return res.json();
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail ?? `HTTP ${res.status}`);
-    } catch (error) {
-      if (url === urls[urls.length - 1]) {
-        throw error;
-      }
-    }
-  }
-  throw new Error('Unable to update task completion.');
+  const res = await fetch(`${API}/api/clients/${clientId}/care-tasks/${taskId}/completion`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  });
+  if (res.ok) return res.json();
+  const err = await res.json().catch(() => ({}));
+  throw new Error(err.detail ?? `HTTP ${res.status}`);
 }

@@ -18,12 +18,13 @@ export type AuthUser = {
   agency_aggregator: string | null; // 'sandata' | 'hhax' | null
 };
 
-type SignInResult = { ok: true } | { ok: false; error: string; retryAfter?: number };
+export type SignInResult = { ok: true } | { ok: false; error: string; retryAfter?: number };
 
 type AuthContextType = {
   user: AuthUser | null;
   isLoading: boolean;
-  signIn: (username: string, password: string, cfToken?: string) => Promise<SignInResult>;
+  signIn: (username: string, password: string, base: string, cfToken?: string) => Promise<SignInResult>;
+  apiBases: string[];
   signOut: () => void;
   /** Authenticated fetch — adds Bearer token, silently refreshes on 401. */
   apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
@@ -42,9 +43,11 @@ function trimSlash(url: string): string {
 
 function buildApiBases(currentHost?: string): string[] {
   const hostBase = currentHost ? `http://${currentHost}:8000` : undefined;
-  const preferred = [
+  const configured = [
     process.env.NEXT_PUBLIC_API_BASE_URL,
     process.env.API_BASE_URL,
+  ].filter((v): v is string => Boolean(v));
+  const preferred = configured.length ? configured : [
     hostBase,
     'http://127.0.0.1:8000',
     'http://localhost:8000',
@@ -76,6 +79,9 @@ async function fetchAuthAcrossBases(
   init: RequestInit,
   timeoutMs = AUTH_TIMEOUT_MS,
 ): Promise<Response> {
+  if (init.method && !['GET', 'HEAD'].includes(init.method.toUpperCase())) {
+    return fetchWithTimeout(`${bases[0]}${path}`, init, timeoutMs);
+  }
   let lastError: unknown = null;
   for (const base of bases) {
     try {
@@ -91,6 +97,7 @@ async function fetchAuthAcrossBases(
 // The middleware checks this — it cannot read the backend's HttpOnly cookie
 // because that belongs to 127.0.0.1:8000, a different origin.
 const SESSION_PRESENCE = 'seriqcare-session';
+const SESSION_API_BASE = 'seriqcare-api-base';
 
 function setPresenceCookie() {
   const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toUTCString();
@@ -132,12 +139,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // In-memory access token — never touches localStorage or a JS-readable cookie
   const accessTokenRef = useRef<string | null>(null);
+  const activeBaseRef = useRef(apiBases[0]);
 
   // Deduplication: if multiple callers hit 401 simultaneously, share one refresh call
   const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
   // Cross-tab coordination via BroadcastChannel
   const bcRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(SESSION_API_BASE);
+      if (saved && apiBases.includes(saved)) activeBaseRef.current = saved;
+    } catch (error) {
+      console.warn('Unable to restore the session API endpoint.', error);
+    }
+  }, [apiBases]);
 
   // ---------------------------------------------------------------------------
   // Silent refresh — called on mount and on 401
@@ -147,7 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const p = (async () => {
       try {
-        const res = await fetchAuthAcrossBases(apiBases, '/api/auth/refresh', {
+        const res = await fetchAuthAcrossBases([activeBaseRef.current], '/api/auth/refresh', {
           method: 'POST',
           credentials: 'include',    // sends HttpOnly "seriqcare-rt" cookie
           headers: { 'Content-Type': 'application/json' },
@@ -178,7 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setTokenCookie(data.access_token);
         setUser(nextUser);
         // Broadcast new token to other tabs so they don't race on /refresh
-        bcRef.current?.postMessage({ type: 'TOKEN_REFRESHED', token: data.access_token, user: nextUser });
+        bcRef.current?.postMessage({ type: 'TOKEN_REFRESHED', token: data.access_token, user: nextUser, base: activeBaseRef.current });
         return data.access_token as string;
       } catch {
         // Network/timeout error — backend unreachable, preserve existing state.
@@ -208,6 +225,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bcRef.current = bc;
     bc.onmessage = (evt) => {
       if (evt.data?.type === 'TOKEN_REFRESHED') {
+        if (typeof evt.data.base === 'string' && apiBases.includes(evt.data.base)) {
+          activeBaseRef.current = evt.data.base;
+        }
         accessTokenRef.current = evt.data.token;
         setTokenCookie(evt.data.token);
         setPresenceCookie();
@@ -220,7 +240,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
     return () => { bc.close(); bcRef.current = null; };
-  }, []);
+  }, [apiBases]);
 
   // Proactive token refresh — keeps the session alive without waiting for a 401.
   useEffect(() => {
@@ -254,7 +274,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const headers = new Headers(init.headers);
     if (token) headers.set('Authorization', `Bearer ${token}`);
 
-    const fullUrl = url.startsWith('http') ? url : `${apiBases[0]}${url}`;
+    const fullUrl = url.startsWith('http') ? url : `${activeBaseRef.current}${url}`;
     let res = await fetch(fullUrl, { ...init, headers, credentials: 'include' });
 
     if (res.status === 401) {
@@ -267,7 +287,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return res;
       }
       headers.set('Authorization', `Bearer ${newToken}`);
-      res = await fetch(fullUrl, { ...init, headers, credentials: 'include' });
+      if (!init.method || ['GET', 'HEAD'].includes(init.method.toUpperCase())) {
+        res = await fetch(fullUrl, { ...init, headers, credentials: 'include' });
+      }
     }
 
     return res;
@@ -279,7 +301,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(() => {
     const token = accessTokenRef.current;
     fetchAuthAcrossBases(
-      apiBases,
+      [activeBaseRef.current],
       '/api/auth/logout',
       {
         method: 'POST',
@@ -300,14 +322,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ---------------------------------------------------------------------------
   // signIn
   // ---------------------------------------------------------------------------
-  const signIn = useCallback(async (username: string, password: string, cfToken?: string): Promise<SignInResult> => {
+  const signIn = useCallback(async (username: string, password: string, base: string, cfToken?: string): Promise<SignInResult> => {
     try {
-      const res = await fetchAuthAcrossBases(apiBases, '/api/auth/login', {
+      const res = await fetchWithTimeout(`${base}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',   // receive HttpOnly refresh token cookie
         body: JSON.stringify({ username, password, client_type: 'web', ...(cfToken ? { cf_turnstile_token: cfToken } : {}) }),
-      });
+      }, AUTH_TIMEOUT_MS);
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -317,6 +339,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const data = await res.json();
+      activeBaseRef.current = base;
+      try {
+        window.sessionStorage.setItem(SESSION_API_BASE, base);
+      } catch (error) {
+        console.warn('Unable to save the session API endpoint.', error);
+      }
       accessTokenRef.current = data.access_token;
       setPresenceCookie();
       setTokenCookie(data.access_token);
@@ -335,11 +363,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       return { ok: false, error: 'Cannot connect to server. Is the backend running?' };
     }
-  }, [apiBases]);
+  }, []);
 
   const value = useMemo<AuthContextType>(
-    () => ({ user, isLoading, signIn, signOut, apiFetch }),
-    [user, isLoading, signIn, signOut, apiFetch],
+    () => ({ user, isLoading, signIn, signOut, apiFetch, apiBases }),
+    [user, isLoading, signIn, signOut, apiFetch, apiBases],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
