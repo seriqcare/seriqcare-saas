@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { HeaderUser } from '@/components/topbar';
 import { useAuth } from '@/components/auth-context';
+import { CreateAgencyWizard as CreateAgencyForm } from '@/components/create-agency-wizard';
 
 /* ── Types ──────────────────────────────────────── */
 type Tab = 'overview' | 'agencies' | 'users' | 'audit' | 'api-log';
@@ -570,156 +571,6 @@ export default function SuperAdminPage() {
 }
 
 /* ── Create Agency Form ─────────────────────────── */
-function CreateAgencyForm({ apiFetch, onClose, onCreated }: {
-  apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [form, setForm] = useState({
-    agency_code: '', name: '', tier: 'core', aggregator: 'sandata', state: 'PA',
-    state_provider_id: '', sandata_provider_id: '',
-    address1: '', city: '', zip: '', phone: '',
-    primary_contact_name: '', primary_contact_email: '', admin_username: '',
-  });
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState<{ username: string; email: string; email_sent: boolean } | null>(null);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.agency_code.trim() || !form.name.trim()) {
-      setError('Agency code and name are required.');
-      return;
-    }
-    if (!form.primary_contact_name.trim() || !form.primary_contact_email.trim()) {
-      setError('Contact name and email are required for the admin account.');
-      return;
-    }
-    if (!form.admin_username.trim()) {
-      setError('Admin username is required.');
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      const res = await apiFetch('/api/super-admin/agencies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          state_provider_id: form.state_provider_id || null,
-          sandata_provider_id: form.sandata_provider_id || null,
-          address1: form.address1 || null,
-          city: form.city || null,
-          zip: form.zip || null,
-          phone: form.phone || null,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(body.detail || 'Failed to create agency.');
-        return;
-      }
-      const data = await res.json();
-      setSuccess({
-        username: data.admin_user.username,
-        email: data.admin_user.email,
-        email_sent: data.email_sent,
-      });
-    } finally { setSaving(false); }
-  };
-
-  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
-
-  if (success) {
-    return (
-      <div className="sa-modal-backdrop">
-        <div className="sa-modal" onClick={(e) => e.stopPropagation()}>
-          <div className="sa-modal-header">
-            <h3>Agency Created</h3>
-          </div>
-          <div style={{ padding: '8px 0 16px' }}>
-            <div className="sa-success">Agency and admin account created successfully.</div>
-            <div className="sa-creds-box">
-              <div className="sa-creds-title">Admin Login Details</div>
-              <div className="sa-creds-row"><span>Username:</span> <span className="sa-mono">{success.username}</span></div>
-              <div className="sa-creds-row"><span>Email:</span> <span className="sa-mono">{success.email}</span></div>
-            </div>
-            {success.email_sent ? (
-              <p style={{ fontSize: 13, color: 'var(--success-text)', margin: '12px 0 0' }}>
-                An onboarding email has been sent to <strong>{success.email}</strong> with a link to set their password.
-              </p>
-            ) : (
-              <p style={{ fontSize: 13, color: 'var(--danger-text)', margin: '12px 0 0' }}>
-                Failed to send onboarding email. The admin can use the &quot;Forgot Password&quot; flow on the login page to set their password.
-              </p>
-            )}
-          </div>
-          <div className="sa-modal-actions">
-            <button className="btn primary" onClick={onCreated}>Done</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="sa-modal-backdrop" onClick={onClose}>
-      <div className="sa-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="sa-modal-header">
-          <h3>Create Agency</h3>
-          <button className="sa-modal-close" onClick={onClose}>&times;</button>
-        </div>
-        <form onSubmit={handleSubmit}>
-          {error && <div className="sa-error">{error}</div>}
-          <div className="sa-form-section">Agency Details</div>
-          <div className="sa-form-grid">
-            <label>Agency Code *<input value={form.agency_code} onChange={set('agency_code')} placeholder="e.g. ACME" /></label>
-            <label>Name *<input value={form.name} onChange={set('name')} placeholder="Agency name" /></label>
-            <label>Tier
-              <select value={form.tier} onChange={set('tier')}>
-                <option value="core">Core</option>
-                <option value="evv">EVV</option>
-                <option value="evvplus">EVV+</option>
-              </select>
-            </label>
-            {(form.tier === 'evv' || form.tier === 'evvplus') && (
-              <label>Aggregator
-                <select value={form.aggregator} onChange={set('aggregator')}>
-                  <option value="sandata">Sandata</option>
-                  <option value="hhax">HHAeXchange</option>
-                </select>
-              </label>
-            )}
-            <label>State<input value={form.state} onChange={set('state')} placeholder="PA" /></label>
-            <label>State Provider ID<input value={form.state_provider_id} onChange={set('state_provider_id')} /></label>
-            <label>Sandata Provider ID<input value={form.sandata_provider_id} onChange={set('sandata_provider_id')} /></label>
-            <label>Address<input value={form.address1} onChange={set('address1')} /></label>
-            <label>City<input value={form.city} onChange={set('city')} /></label>
-            <label>ZIP<input value={form.zip} onChange={set('zip')} /></label>
-            <label>Phone<input value={form.phone} onChange={set('phone')} /></label>
-          </div>
-          <div className="sa-form-section">Admin Account</div>
-          <div className="sa-form-grid">
-            <label>Contact Name *<input value={form.primary_contact_name} onChange={set('primary_contact_name')} placeholder="Full name" /></label>
-            <label>Contact Email *<input value={form.primary_contact_email} onChange={set('primary_contact_email')} type="email" placeholder="admin@agency.com" /></label>
-            <label>Admin Username *<input value={form.admin_username} onChange={set('admin_username')} placeholder="e.g. jsmith" /></label>
-          </div>
-          <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '8px 0 0' }}>
-            An onboarding email will be sent to the contact email with a link to set their password.
-          </p>
-          <div className="sa-modal-actions">
-            <button type="button" className="btn secondary" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn primary" disabled={saving}>{saving ? 'Creating...' : 'Create Agency'}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-/* ── Edit Agency Form ───────────────────────────── */
 function EditAgencyForm({ agency, apiFetch, onClose, onSaved }: {
   agency: Agency;
   apiFetch: (url: string, init?: RequestInit) => Promise<Response>;
@@ -787,7 +638,7 @@ function EditAgencyForm({ agency, apiFetch, onClose, onSaved }: {
               <select value={form.tier} onChange={set('tier')}>
                 <option value="core">Core</option>
                 <option value="evv">EVV</option>
-                <option value="evvplus">EVV+</option>
+                <option value="evvplus" disabled={agency.tier !== 'evvplus'}>EVV+ (planned)</option>
               </select>
             </label>
             {(form.tier === 'evv' || form.tier === 'evvplus') && (

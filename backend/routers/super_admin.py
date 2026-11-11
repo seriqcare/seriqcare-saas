@@ -134,12 +134,23 @@ class AgencyCreate(BaseModel):
     admin_username:        str
 
 
+def _validate_agency_plan(tier: str, aggregator: str | None, current_tier: str | None = None):
+    if tier not in {"core", "evv", "evvplus"}:
+        raise HTTPException(status_code=422, detail="Choose a valid agency plan.")
+    if tier == "evvplus" and current_tier != "evvplus":
+        raise HTTPException(status_code=422, detail="EVV+ is planned and cannot be assigned yet.")
+    if tier in {"evv", "evvplus"} and aggregator not in {"sandata", "hhax"}:
+        raise HTTPException(status_code=422, detail="Choose Sandata or HHAeXchange for the EVV aggregator.")
+    return None if tier == "core" else aggregator
+
+
 @router.post("/agencies", status_code=201)
 def create_agency(
     body: AgencyCreate,
     current_user: User = Depends(require_role("super_admin")),
     db: Session = Depends(get_db),
 ):
+    body.aggregator = _validate_agency_plan(body.tier, body.aggregator)
     code = body.agency_code.strip().upper()
     email = body.primary_contact_email.strip().lower()
     username = body.admin_username.strip()
@@ -270,7 +281,7 @@ def update_agency(
     db: Session = Depends(get_db),
 ):
     exists = db.execute(
-        text("SELECT id FROM care.agencies WHERE id = :id"), {"id": agency_id}
+        text("SELECT id, tier, aggregator FROM care.agencies WHERE id = :id"), {"id": agency_id}
     ).fetchone()
     if not exists:
         raise HTTPException(status_code=404, detail="Agency not found.")
@@ -278,6 +289,11 @@ def update_agency(
     updates = body.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=422, detail="No fields to update.")
+
+    if "tier" in body.model_fields_set or "aggregator" in body.model_fields_set:
+        target_tier = body.tier if body.tier is not None else exists.tier
+        target_aggregator = body.aggregator if "aggregator" in body.model_fields_set else exists.aggregator
+        updates["aggregator"] = _validate_agency_plan(target_tier, target_aggregator, exists.tier)
 
     # Only allow known columns (safe against injection since keys come from Pydantic)
     allowed = {"name", "tier", "aggregator", "is_active", "state_provider_id",
