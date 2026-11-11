@@ -315,7 +315,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!newToken) {
         // Preserve the session on timeouts/server errors for a later retry.
         if (!accessTokenRef.current && !document.cookie.includes(`${SESSION_PRESENCE}=`)) {
-          router.replace('/login');
+          if (pathname !== '/clock' && !pathname.startsWith('/clock/')) {
+            router.replace('/login');
+          }
         }
         return res;
       }
@@ -326,7 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     return res;
-  }, [apiBases, silentRefresh, router]);
+  }, [apiBases, silentRefresh, router, pathname]);
 
   // ---------------------------------------------------------------------------
   // signOut

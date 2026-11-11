@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 // Exercise actual provider callbacks with browser and React boundaries stubbed.
-function harness(host = 'localhost', apiBase = 'http://127.0.0.1:8000') {
+function harness(host = 'localhost', apiBase = 'http://127.0.0.1:8000', pathname = '/clients') {
   let now = 1_000_000, context, apiStatus = 200;
   let refreshResponse = { ok: false, status: 401 };
   const effects = [], intervals = [], redirects = [], calls = [];
@@ -40,7 +40,7 @@ function harness(host = 'localhost', apiBase = 'http://127.0.0.1:8000') {
       if (name === 'react') return react;
       if (name === 'react/jsx-runtime') return { jsx: (type, props) => { context = props.value; } };
       if (name === 'next/navigation') return {
-        usePathname: () => '/clients', useRouter: () => ({ replace: path => redirects.push(path) }),
+        usePathname: () => pathname, useRouter: () => ({ replace: path => redirects.push(path) }),
       };
       throw new Error(`Unexpected import: ${name}`);
     },
@@ -75,6 +75,14 @@ function harness(host = 'localhost', apiBase = 'http://127.0.0.1:8000') {
   };
 }
 async function settle() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
+
+test('expired clock sessions stay on the mobile sign-in screen', async () => {
+  const h = harness('localhost', 'http://127.0.0.1:8000', '/clock');
+  await settle();
+  h.apiStatus(401);
+  await h.auth.apiFetch('/api/schedules/today');
+  assert.deepEqual(h.redirects, []);
+});
 async function signedIn() {
   const h = harness();
   await settle();

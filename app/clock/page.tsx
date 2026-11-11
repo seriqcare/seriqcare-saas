@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-context';
 import { useLoginFlow } from '@/components/use-login-flow';
+import styles from './clock.module.css';
 
 type TabId = 'schedule' | 'clock' | 'tasks' | 'profile';
 
@@ -397,11 +398,11 @@ export default function ClockPage() {
       color: '#233046',
       position: 'relative',
     }}>
-      <div style={{ background: '#fff', padding: '18px 18px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className={styles.header} style={{ background: '#fff', paddingBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ fontSize: 24, lineHeight: 1.1, color: '#1f2d45', fontWeight: 700 }}>Seriq<span style={{ color: '#2f6ea8' }}>Care</span></div>
       </div>
 
-      <div style={{ padding: '20px 16px 110px' }}>
+      <main className={styles.content} aria-label={`${activeTab} content`}>
         {activeTab === 'schedule' && (
           <>
             <div style={{ marginBottom: 14 }}>
@@ -436,7 +437,7 @@ export default function ClockPage() {
                     border: isSelected ? '2px solid #2f6ea8' : '1px solid #ced7e2',
                     boxShadow: '0 2px 6px rgba(25, 32, 46, 0.08)',
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                    <div className={styles.cardHeading} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                       <div style={{ fontSize: 16, fontWeight: 800 }}>{s.client_name}</div>
                       <div style={{
                         background: isScheduled ? '#dff3e8' : isCompleted ? '#ecf0f6' : '#fdf0f0',
@@ -534,7 +535,7 @@ export default function ClockPage() {
             </div>
 
             <div style={{ background: '#fff', borderRadius: 22, padding: 18, border: '1px solid #ccd5e2', marginBottom: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div className={styles.cardHeading} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div style={{ fontSize: 18, fontWeight: 800, color: '#2f6ea8' }}>Active Schedule</div>
                 <button onClick={() => setActiveTab('schedule')} style={{ border: 'none', background: 'none', color: '#2f6ea8', fontSize: 15, cursor: 'pointer' }}>Change</button>
               </div>
@@ -642,7 +643,7 @@ export default function ClockPage() {
                       padding: '14px 14px 12px',
                       marginBottom: 12,
                     }}>
-                      <label style={{ display: 'grid', gridTemplateColumns: '34px 1fr', columnGap: 10, alignItems: 'start' }}>
+                      <label style={{ display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr)', columnGap: 10, alignItems: 'start', minHeight: 44, cursor: 'pointer' }}>
                         <input
                           type="checkbox"
                           checked={checked}
@@ -700,7 +701,7 @@ export default function ClockPage() {
             ) : profile ? (
               <>
                 <div style={{ background: '#fff', borderRadius: 22, border: '1px solid #ccd5e2', padding: 18, display: 'flex', gap: 12, alignItems: 'center', marginBottom: 14 }}>
-                  <div style={{ width: 66, height: 66, borderRadius: 999, background: '#d8e2ee', color: '#2f6ea8', display: 'grid', placeItems: 'center', fontSize: 34, fontWeight: 700 }}>
+                  <div style={{ width: 66, height: 66, flexShrink: 0, borderRadius: 999, background: '#d8e2ee', color: '#2f6ea8', display: 'grid', placeItems: 'center', fontSize: 34, fontWeight: 700 }}>
                     {(profile.display_name ?? profile.username).charAt(0).toUpperCase()}
                   </div>
                   <div>
@@ -749,13 +750,12 @@ export default function ClockPage() {
             )}
           </>
         )}
-      </div>
+      </main>
 
       {snack && (
-        <div style={{
+        <div className={styles.snack} role="status" style={{
           position: 'fixed',
           left: '50%',
-          bottom: 100,
           transform: 'translateX(-50%)',
           width: 'min(450px, calc(100vw - 24px))',
           background: '#2f333c',
@@ -770,7 +770,7 @@ export default function ClockPage() {
         </div>
       )}
 
-      <div style={{
+      <nav className={styles.navigation} aria-label="Clock app navigation" style={{
         position: 'fixed',
         bottom: 0,
         left: '50%',
@@ -778,7 +778,6 @@ export default function ClockPage() {
         width: 'min(480px, 100vw)',
         background: '#e7ebf2',
         borderTop: '1px solid #d4dbe7',
-        padding: '8px 8px calc(8px + env(safe-area-inset-bottom))',
         zIndex: 35,
       }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
@@ -787,7 +786,7 @@ export default function ClockPage() {
           <BottomTab label="Tasks" icon={<IconChecklist />} active={activeTab === 'tasks'} onPress={() => setActiveTab('tasks')} />
           <BottomTab label="Profile" icon={<IconUser />} active={activeTab === 'profile'} onPress={() => setActiveTab('profile')} />
         </div>
-      </div>
+      </nav>
     </div>
   );
 }
@@ -805,6 +804,7 @@ function BottomTab({
 }) {
   return (
     <button
+      aria-current={active ? 'page' : undefined}
       onClick={onPress}
       style={{
         border: 'none',
@@ -931,7 +931,7 @@ function ProfileCard({ title, rows }: { title: string; rows: Array<[string, stri
   return (
     <div style={{ background: '#fff', borderRadius: 22, border: '1px solid #ccd5e2', padding: 18, marginBottom: 14 }}>
       <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 10 }}>{title}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', rowGap: 10, columnGap: 10, fontSize: 14 }}>
+      <div className={styles.profileGrid}>
         {rows.map(([k, v]) => (
           <Row key={k} label={k} value={v} />
         ))}
@@ -976,17 +976,16 @@ function MobileLoginScreen() {
   }
 
   return (
-    <div style={{
+    <div className={styles.login} style={{
       minHeight: '100dvh',
       background: '#e6e9ef',
       fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, sans-serif',
-      padding: '20px 16px 32px',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'flex-start',
     }}>
       <div style={{ width: '100%', maxWidth: 420, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: 18, marginTop: 32 }}>
+        <div className={styles.loginBrand} style={{ textAlign: 'center', marginBottom: 18, marginTop: 32 }}>
           <img src="/logo.png" alt="SeriqCare" width={88} height={88} style={{ borderRadius: 2 }} />
           <div style={{ fontSize: 28, fontWeight: 300, color: '#1f2d45', marginTop: 8 }}>Seriq<span style={{ color: '#2f6ea8' }}>Care</span></div>
           <div style={{ marginTop: 10, color: '#66758e', fontSize: 14 }}>Sign in to view your schedule and clock in or out.</div>
@@ -996,7 +995,7 @@ function MobileLoginScreen() {
           <InputField icon={<IconUser />} placeholder="Username" value={username} onChange={setUsername} />
           <div style={{ height: 12 }} />
           <InputField icon={<IconLock />} placeholder="Password" type={showPw ? 'text' : 'password'} value={password} onChange={setPassword} endAdornment={
-            <button type="button" onClick={() => setShowPw((v) => !v)} style={{ border: 'none', background: 'none', color: '#556', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
+            <button className={styles.passwordToggle} type="button" aria-label={showPw ? 'Hide password' : 'Show password'} aria-pressed={showPw} onClick={() => setShowPw((v) => !v)} style={{ border: 'none', background: 'none', color: '#556', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
               {showPw ? <IconEyeOff /> : <IconEye />}
             </button>
           } />
@@ -1061,15 +1060,20 @@ function InputField({
       padding: '10px 12px',
       background: '#fff',
     }}>
-      <span style={{ color: '#4d5666', fontSize: 18, width: 18, display: 'grid', placeItems: 'center' }}>{icon}</span>
+      <span className={styles.inputIcon} style={{ color: '#4d5666', fontSize: 18, width: 18, display: 'grid', placeItems: 'center' }}>{icon}</span>
       <input
+        className={styles.input}
+        aria-label={placeholder}
+        name={placeholder.toLowerCase()}
+        autoComplete={placeholder === 'Password' ? 'current-password' : 'username'}
+        autoCapitalize="none"
+        autoCorrect="off"
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         style={{
           border: 'none',
-          outline: 'none',
           flex: 1,
           fontSize: 16,
           color: '#2c3548',

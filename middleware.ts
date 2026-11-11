@@ -11,6 +11,11 @@ const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/reset-password'
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // The clock has its own sign-in screen and stays available during an active session.
+  if (pathname === '/clock' || pathname.startsWith('/clock/') || pathname === '/clock.webmanifest') {
+    return NextResponse.next();
+  }
+
   // Pass through Next.js internals, API routes, and static files
   if (
     pathname.startsWith('/_next') ||
