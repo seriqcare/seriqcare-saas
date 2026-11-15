@@ -5,6 +5,7 @@ import { getClients } from '@/lib/queries/clients';
 import { getCaregivers } from '@/lib/queries/caregivers';
 // import { QuerySearchInput } from '@/components/query-search-input';
 import { NewShiftButton } from '@/components/new-shift-modal';
+import { paginateScheduleVisits } from '@/lib/schedule-pagination';
 
 export const dynamic = 'force-dynamic';
 
@@ -116,7 +117,7 @@ function buildQuery(base: Record<string, string | undefined>) {
 export default async function SchedulePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; mode?: string; search?: string; client?: string; caregiver?: string }>;
+  searchParams: Promise<{ date?: string; mode?: string; search?: string; client?: string; caregiver?: string; action?: string; page?: string }>;
 }) {
   const params = await searchParams;
   const search = params.search?.trim() ?? '';
@@ -185,6 +186,14 @@ export default async function SchedulePage({
   }
 
   const coveragePct = stats.coverage_rate;
+  const visitsPage = paginateScheduleVisits(filteredEntries, params.page);
+  const lastVisiblePage = Math.min(visitsPage.totalPages, Math.max(5, visitsPage.page + 2));
+  const firstVisiblePage = Math.max(1, lastVisiblePage - 4);
+  const visitPageNumbers = Array.from({ length: lastVisiblePage - firstVisiblePage + 1 }, (_, index) => firstVisiblePage + index);
+  const visitsPageHref = (page: number) => buildQuery({
+    mode, date: isoDate(anchorDate), search: search || undefined,
+    client: filterClient || undefined, caregiver: filterCaregiver || undefined, page: String(page),
+  });
 
   const prevHref = buildQuery({ mode, date: isoDate(mode === 'month' ? addMonths(anchorDate, -1) : addDays(anchorDate, -7)), search: search || undefined });
   const nextHref = buildQuery({ mode, date: isoDate(mode === 'month' ? addMonths(anchorDate, 1) : addDays(anchorDate, 7)), search: search || undefined });
@@ -236,7 +245,7 @@ export default async function SchedulePage({
             <Link href={monthHref} className={`status-tab${mode === 'month' ? ' active' : ''}`}>Month</Link>
           </div>
           <button className="btn secondary">Export</button>
-          <NewShiftButton clients={clientList} caregivers={caregiverList} serviceCodes={serviceCodes} />
+          <NewShiftButton clients={clientList} caregivers={caregiverList} serviceCodes={serviceCodes} assignmentMode={params.action === 'assign-caregiver'} />
         </div>
       </div>
 
@@ -403,7 +412,7 @@ export default async function SchedulePage({
                     No visits match this search in the current period
                   </td>
                 </tr>
-              ) : filteredEntries.map((e) => {
+              ) : visitsPage.entries.map((e) => {
                 const durH = ((parseDateTime(e.scheduled_end).getTime() - parseDateTime(e.scheduled_start).getTime()) / 3_600_000).toFixed(1);
                 return (
                   <tr key={e.id}>
@@ -460,12 +469,14 @@ export default async function SchedulePage({
           </table>
         </div>
         <div className="pagination" style={{ padding: '10px 18px' }}>
-          <div>Showing 1–{filteredEntries.length} of {filteredEntries.length} visits in this {mode}</div>
-          <div className="page-controls">
-            <div className="page-btn">‹</div>
-            <div className="page-btn active">1</div>
-            <div className="page-btn">›</div>
-          </div>
+          <div>Showing {visitsPage.from}–{visitsPage.to} of {filteredEntries.length} visits in this {mode}</div>
+          <nav className="page-controls" aria-label="Scheduled visits pagination">
+            {visitsPage.page > 1 ? <Link className="page-btn" href={visitsPageHref(visitsPage.page - 1)} scroll={false} aria-label="Previous visits page">‹</Link>
+              : <span className="page-btn" aria-disabled="true" style={{ opacity: .45 }}>‹</span>}
+            {visitPageNumbers.map(page => <Link key={page} className={`page-btn${page === visitsPage.page ? ' active' : ''}`} href={visitsPageHref(page)} scroll={false} aria-label={`Visits page ${page}`} aria-current={page === visitsPage.page ? 'page' : undefined}>{page}</Link>)}
+            {visitsPage.page < visitsPage.totalPages ? <Link className="page-btn" href={visitsPageHref(visitsPage.page + 1)} scroll={false} aria-label="Next visits page">›</Link>
+              : <span className="page-btn" aria-disabled="true" style={{ opacity: .45 }}>›</span>}
+          </nav>
         </div>
       </div>
       </div>

@@ -713,7 +713,7 @@ def admin_reset_password(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin accounts authenticate via Entra ID — password reset is not supported here.",
         )
-    if current_user.role == "agency_admin" and target.agency_id != current_user.agency_id:
+    if current_user.role in ("agency_admin", "coordinator") and (current_user.agency_id is None or target.agency_id != current_user.agency_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     if body.user_type == "portal" and target.role not in _PORTAL_ROLES:
         raise HTTPException(

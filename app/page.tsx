@@ -28,7 +28,7 @@ export default async function DashboardPage() {
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p className="page-subtitle">
-            PA ODP home-care operations · EVV compliance · Sandata aggregator
+            Home-care operations
           </p>
         </div>
         <div className="top-actions">

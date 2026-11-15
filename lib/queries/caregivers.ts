@@ -1,7 +1,6 @@
 import { getAuthHeaders } from './server-auth';
 
 const API = process.env.API_BASE_URL ?? 'http://localhost:8000';
-const READ_REVALIDATE_SECONDS = 30;
 
 export interface CaregiverStats {
   total_caregivers: number;
@@ -22,6 +21,21 @@ export interface CaregiverSummary {
   clients_assigned: number;
   visits_this_week: number;
   hours_this_week: number;
+}
+
+export interface CaregiverAccountDetails {
+  employee_id: number;
+  phone: string | null;
+  sandata_employee_id: string | null;
+  hhax_employee_id: string | null;
+  npi: string | null;
+  mobile_account: {
+    username: string;
+    display_name: string | null;
+    email: string | null;
+    is_active: boolean;
+    has_password: boolean;
+  } | null;
 }
 
 export interface CaregiversResponse {
@@ -54,7 +68,7 @@ async function fetchWithTimeout(url: string, ms = 8000, headers?: HeadersInit): 
   const timer = setTimeout(() => controller.abort(), ms);
   try {
     return await fetch(url, {
-      next: { revalidate: READ_REVALIDATE_SECONDS },
+      cache: 'no-store',
       signal: controller.signal,
       headers,
     });

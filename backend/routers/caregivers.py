@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, timedelta
+import re
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.database import get_db
@@ -22,6 +24,7 @@ _log = logging.getLogger("seriqcare.caregivers")
 from backend.schemas import (
     CaregiverSummary, CaregiverStats, CaregiversResponse,
     CaregiverCreateRequest, CaregiverCreateResponse,
+    CaregiverAccountDetails, CaregiverMobileAccount, CaregiverMobileAccountUpdate, CaregiverMobileUserOption,
     CaregiverPayrollSettingsResponse,
     CaregiverPayrollSettingsUpdateRequest,
     CaregiverPayrollSettingsUpdateResponse,
@@ -35,6 +38,32 @@ def _current_week_bounds() -> tuple[date, date]:
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     return monday, sunday
+
+
+@router.get("/mobile-users", response_model=list[CaregiverMobileUserOption])
+def get_caregiver_mobile_users(
+    db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
+):
+    rows = db.execute(
+        text(f"""
+            SELECT e.id AS employee_id, e.first_name + ' ' + e.last_name AS name,
+                e.employee_code, mobile.username
+            FROM care.employees e
+            OUTER APPLY (
+                SELECT TOP 1 u.username FROM care.users u
+                WHERE u.employee_id = e.id AND u.agency_id = e.agency_id
+                  AND u.role = 'caregiver' AND u.is_active = 1
+                ORDER BY u.id
+            ) mobile
+            WHERE {scope.sql_filter('e')}
+            ORDER BY e.first_name, e.last_name, e.employee_code, e.id
+        """),
+        scope.bind({}),
+    ).fetchall()
+    return [CaregiverMobileUserOption(
+        employee_id=row.employee_id, name=row.name, employee_code=row.employee_code, username=row.username,
+    ) for row in rows]
 
 
 @router.get("", response_model=CaregiversResponse)
@@ -211,16 +240,21 @@ def create_caregiver(
     db: Session = Depends(get_db),
     scope: AgencyScope = Depends(get_agency_scope),
 ):
+    if scope.agency_id is None:
+        raise HTTPException(status_code=403, detail="An agency is required to create a caregiver.")
+    employee_code = body.employee_code.strip()
+    if not employee_code:
+        raise HTTPException(status_code=422, detail="Employee code is required.")
     try:
-        # Check for duplicate employee_code
+        # Employee codes are unique within an agency, including inactive employees.
         existing = db.execute(
-            text("SELECT id FROM care.employees WHERE employee_code = :code"),
-            {"code": body.employee_code},
+            text("SELECT id FROM care.employees WHERE agency_id = :agency_id AND employee_code = :code"),
+            {"agency_id": scope.agency_id, "code": employee_code},
         ).fetchone()
         if existing:
             raise HTTPException(
                 status_code=409,
-                detail=f"Employee code '{body.employee_code}' is already in use.",
+                detail=f"Employee code '{employee_code}' is already in use in this agency.",
             )
 
         # Check for duplicate username if provided
@@ -237,7 +271,7 @@ def create_caregiver(
 
         agency_id = scope.agency_id
 
-        # Insert employee — include agency_id only if the column exists in the live table
+        # Insert employee — require the multi-agency schema before creating a record.
         # (it may have been added via ALTER TABLE after the initial DDL was run)
         has_agency_col = db.execute(
             text("""
@@ -245,6 +279,9 @@ def create_caregiver(
                 WHERE TABLE_SCHEMA='care' AND TABLE_NAME='employees' AND COLUMN_NAME='agency_id'
             """)
         ).fetchone() is not None
+
+        if not has_agency_col:
+            raise HTTPException(status_code=503, detail="Caregiver creation requires the agency schema migration.")
 
         if has_agency_col and agency_id:
             emp_row = db.execute(
@@ -414,9 +451,159 @@ def create_caregiver(
 
     except HTTPException:
         raise
+    except IntegrityError as exc:
+        db.rollback()
+        if "uq_employees_agency_code" in str(exc.orig).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Employee code '{employee_code}' is already in use in this agency.",
+            ) from exc
+        raise HTTPException(status_code=500, detail="Caregiver could not be saved due to a database constraint.") from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Create failed: {exc}") from exc
+
+
+@router.get("/{caregiver_id}/account-details", response_model=CaregiverAccountDetails)
+def get_caregiver_account_details(
+    caregiver_id: int,
+    db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
+):
+    employee = db.execute(
+        text(f"""
+            SELECT e.id, e.agency_id, e.phone, e.sandata_employee_id, e.hhax_employee_id, e.npi
+            FROM care.employees e
+            WHERE e.id = :id AND {scope.sql_filter('e')}
+        """),
+        scope.bind({"id": caregiver_id}),
+    ).fetchone()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Caregiver not found.")
+
+    account = db.execute(
+        text("""
+            SELECT TOP 1 u.username, u.display_name, u.email, u.is_active,
+                CASE WHEN NULLIF(u.password_hash, '') IS NOT NULL THEN 1 ELSE 0 END AS has_password
+            FROM care.users u
+            WHERE u.employee_id = :employee_id AND u.agency_id = :agency_id AND u.role = 'caregiver'
+            ORDER BY u.is_active DESC, u.id
+        """),
+        {"employee_id": employee.id, "agency_id": employee.agency_id},
+    ).fetchone()
+    return CaregiverAccountDetails(
+        employee_id=employee.id,
+        phone=employee.phone,
+        sandata_employee_id=employee.sandata_employee_id,
+        hhax_employee_id=employee.hhax_employee_id,
+        npi=employee.npi,
+        mobile_account=CaregiverMobileAccount(
+            username=account.username, display_name=account.display_name,
+            email=account.email, is_active=bool(account.is_active), has_password=bool(account.has_password),
+        ) if account else None,
+    )
+
+
+@router.put("/{caregiver_id}/mobile-account", response_model=CaregiverMobileAccount)
+def save_caregiver_mobile_account(
+    caregiver_id: int,
+    body: CaregiverMobileAccountUpdate,
+    db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
+):
+    username = body.username.strip()
+    email = (body.email or "").strip() or None
+    if not username:
+        raise HTTPException(status_code=422, detail="Mobile username is required.")
+    if email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(status_code=422, detail="Enter a valid account email address.")
+    if body.new_password is not None and len(body.new_password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=422, detail="Password must be at most 72 bytes.")
+
+    try:
+        # Serialize account creation for this employee, including concurrent requests.
+        employee = db.execute(
+            text(f"""
+                SELECT e.id, e.agency_id FROM care.employees e WITH (UPDLOCK, HOLDLOCK)
+                WHERE e.id = :id AND {scope.sql_filter('e')}
+            """),
+            scope.bind({"id": caregiver_id}),
+        ).fetchone()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Caregiver not found.")
+        if employee.agency_id is None:
+            raise HTTPException(status_code=422, detail="Assign this employee to an agency before creating a mobile account.")
+
+        account = db.execute(
+            text("""
+                SELECT TOP 1 u.id, u.username, u.is_active,
+                    CASE WHEN NULLIF(u.password_hash, '') IS NOT NULL THEN 1 ELSE 0 END AS has_password
+                FROM care.users u
+                WHERE u.employee_id = :employee_id AND u.agency_id = :agency_id AND u.role = 'caregiver'
+                ORDER BY u.is_active DESC, u.id
+            """),
+            {"employee_id": employee.id, "agency_id": employee.agency_id},
+        ).fetchone()
+        duplicate = db.execute(
+            text("SELECT id FROM care.users WHERE username = :username AND id <> :user_id"),
+            {"username": username, "user_id": account.id if account else 0},
+        ).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="This mobile username is already in use.")
+
+        values = {
+            "username": username, "display_name": (body.display_name or "").strip() or None,
+            "email": email, "is_active": body.is_active,
+            "employee_id": employee.id, "agency_id": employee.agency_id,
+        }
+        if body.new_password is not None:
+            from backend.routers.auth import _hash_password
+            values["password_hash"] = _hash_password(body.new_password)
+
+        if account:
+            values["user_id"] = account.id
+            password_assignment = ", password_hash = :password_hash" if body.new_password is not None else ""
+            db.execute(
+                text(f"""
+                    UPDATE care.users SET username = :username, display_name = :display_name,
+                        email = :email, is_active = :is_active {password_assignment}
+                    WHERE id = :user_id AND employee_id = :employee_id
+                      AND agency_id = :agency_id AND role = 'caregiver'
+                """), values,
+            )
+            if body.new_password is not None or username != account.username or not body.is_active:
+                # Old access and refresh sessions must not survive credential changes.
+                session_values = {"user_id": account.id, "now": datetime.utcnow()}
+                for session_table in ("user_sessions", "device_sessions"):
+                    db.execute(text(f"""
+                        UPDATE care.{session_table} SET revoked_at = :now, revoke_reason = 'account_updated'
+                        WHERE user_id = :user_id AND revoked_at IS NULL
+                    """), session_values)
+        else:
+            values.setdefault("password_hash", None)
+            db.execute(
+                text("""
+                    INSERT INTO care.users
+                        (agency_id, employee_id, username, display_name, email, role, is_active, password_hash)
+                    VALUES (:agency_id, :employee_id, :username, :display_name, :email,
+                            'caregiver', :is_active, :password_hash)
+                """), values,
+            )
+        db.commit()
+        return CaregiverMobileAccount(
+            username=username, display_name=values["display_name"], email=email,
+            is_active=body.is_active, has_password=bool(body.new_password is not None or (account and account.has_password)),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This username or mobile account already exists.") from exc
+    except Exception as exc:
+        db.rollback()
+        _log.error("Mobile account save failed for employee_id=%s: %s", caregiver_id, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Could not save the mobile account.") from exc
 
 
 @router.get("/{caregiver_id}/payroll", response_model=CaregiverPayrollSettingsResponse)

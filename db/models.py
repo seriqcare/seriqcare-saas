@@ -18,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -262,10 +263,14 @@ class ClientPayerInfo(Base):
 
 class Employee(Base):
     __tablename__ = "employees"
-    __table_args__ = {"schema": _SCHEMA}
+    __table_args__ = (
+        UniqueConstraint("agency_id", "employee_code", name="UQ_employees_agency_code"),
+        {"schema": _SCHEMA},
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    employee_code: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    agency_id: Mapped[Optional[int]] = mapped_column(Integer)
+    employee_code: Mapped[str] = mapped_column(String(20), nullable=False)
     sandata_employee_id: Mapped[Optional[str]] = mapped_column(String(50))
     hhax_employee_id: Mapped[Optional[str]] = mapped_column(String(50))
     npi: Mapped[Optional[str]] = mapped_column(String(20))

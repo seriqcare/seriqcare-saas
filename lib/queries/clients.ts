@@ -1,7 +1,6 @@
 import { getAuthHeaders } from './server-auth';
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? 'http://127.0.0.1:8000';
-const READ_REVALIDATE_SECONDS = 30;
 
 export interface ClientStats {
   total_clients: number;
@@ -186,7 +185,7 @@ async function fetchWithTimeout(url: string, ms = 8000, headers?: HeadersInit): 
   const timer = setTimeout(() => controller.abort(), ms);
   try {
     return await fetch(url, {
-      next: { revalidate: READ_REVALIDATE_SECONDS },
+      cache: 'no-store',
       signal: controller.signal,
       headers,
     });

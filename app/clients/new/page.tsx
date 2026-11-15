@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { useAuth } from '@/components/auth-context';
+import styles from '@/components/intake-wizard.module.css';
+import { refreshClientsAfterSave } from '../actions';
 
 const SECTIONS = [
   { id: 'personal',   step: 1, label: 'Personal Info' },
@@ -34,6 +36,8 @@ type FormState = {
   emergencyPhone: string;
   // Insurance
   medicaidId: string;
+  payer: string;
+  managedCarePlan: string;
   waiverProgram: string;
   // Service Auth
   procedureCode: string;
@@ -57,7 +61,7 @@ const EMPTY: FormState = {
   ssnLast4: '', phone: '', email: '',
   streetAddress: '', city: '', state: 'PA', zipCode: '',
   emergencyName: '', emergencyRelationship: '', emergencyPhone: '',
-  medicaidId: '', waiverProgram: '',
+  medicaidId: '', payer: 'Pennsylvania Medicaid (MA)', managedCarePlan: '', waiverProgram: '',
   procedureCode: '', authorizedUnits: '', authStart: '', authEnd: '',
   placeOfService: '12', authNotes: '',
   coordinator: '', physician: '', levelOfCare: '',
@@ -66,50 +70,108 @@ const EMPTY: FormState = {
 
 export default function NewClientPage() {
   const router = useRouter();
-  const { apiFetch } = useAuth();
+  const { apiFetch, user } = useAuth();
   const [activeSection, setActiveSection] = useState('personal');
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState('');
   const [success, setSuccess] = useState('');
+  const [completed, setCompleted] = useState<string[]>([]);
+  const headingRef = useRef<HTMLDivElement>(null);
+  const draftKey = user ? `seriqcare-client-draft:${user.agency_id}:${user.username}` : null;
+  const activeIndex = SECTIONS.findIndex(section => section.id === activeSection);
 
   useEffect(() => {
-    const observers: IntersectionObserver[] = [];
-    SECTIONS.forEach(({ id }) => {
-      const el = document.getElementById(`sec-${id}`);
-      if (!el) return;
-      const obs = new IntersectionObserver(
-        ([entry]) => { if (entry.isIntersecting) setActiveSection(id); },
-        { rootMargin: '-20% 0px -60% 0px', threshold: 0 },
-      );
-      obs.observe(el);
-      observers.push(obs);
-    });
-    return () => observers.forEach((obs) => obs.disconnect());
-  }, []);
+    if (!draftKey) return;
+    setForm(EMPTY);
+    setActiveSection('personal');
+    setCompleted([]);
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft.version !== 1 || !draft.form || typeof draft.form !== 'object') return;
+      const restored = { ...EMPTY };
+      for (const key of Object.keys(EMPTY) as Array<keyof FormState>) {
+        if (typeof draft.form[key] === 'string') restored[key] = draft.form[key];
+      }
+      setForm(restored);
+      setSuccess('Saved draft restored from this browser tab.');
+    } catch {
+      setError('Could not restore the saved draft.');
+    }
+  }, [draftKey]);
 
   function scrollTo(id: string) {
-    document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveSection(id);
+    requestAnimationFrame(() => {
+      headingRef.current?.focus();
+      headingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function validateStep(id: string): string {
+    if (id === 'personal') {
+      if (!form.firstName.trim()) return 'First name is required.';
+      if (!form.lastName.trim()) return 'Last name is required.';
+      if (!form.dateOfBirth) return 'Date of birth is required.';
+      if (!form.streetAddress.trim()) return 'Street address is required.';
+      if (!form.city.trim()) return 'City is required.';
+      if (!form.zipCode.trim()) return 'ZIP code is required.';
+      if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return 'Enter a valid email address.';
+    }
+    if (id === 'insurance' && !/^\d{10}$/.test(form.medicaidId.replace(/\D/g, ''))) return 'Medicaid ID must be exactly 10 digits.';
+    if (id === 'auth') {
+      if (!form.procedureCode) return 'Service code is required.';
+      if (form.authStart && form.authEnd && form.authEnd < form.authStart) return 'Authorization end must be on or after the start date.';
+    }
+    if (id === 'careplan' && form.planStart && form.reviewDate && form.reviewDate < form.planStart) return 'Review date must be on or after the plan start date.';
+    return '';
+  }
+
+  function goToStep(index: number) {
+    if (saving) return;
+    if (index > activeIndex) {
+      for (let i = 0; i < index; i++) {
+        const message = validateStep(SECTIONS[i].id);
+        if (message) {
+          setError(message);
+          scrollTo(SECTIONS[i].id);
+          return;
+        }
+      }
+      setCompleted(previous => Array.from(new Set([...previous, ...SECTIONS.slice(0, index).map(section => section.id)])));
+    }
+    setError('');
+    setSuccess('');
+    scrollTo(SECTIONS[index].id);
+  }
+
+  function saveDraft() {
+    if (!draftKey) return;
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify({ version: 1, form }));
+      setError('');
+      setSuccess('Draft saved in this browser tab. Return here to resume.');
+    } catch {
+      setError('Draft could not be saved. Browser storage may be unavailable.');
+    }
   }
 
   function set(key: keyof FormState) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-      setForm(f => ({ ...f, [key]: e.target.value }));
+      { setForm(f => ({ ...f, [key]: e.target.value })); setSuccess(''); setCompleted(previous => previous.filter(id => id !== activeSection)); };
   }
 
   async function handleSave() {
+    if (saving) return;
     setError('');
     setSuccess('');
 
-    if (!form.firstName.trim())  { setError('First name is required.');                         scrollTo('personal');  return; }
-    if (!form.lastName.trim())   { setError('Last name is required.');                          scrollTo('personal');  return; }
-    if (!form.dateOfBirth)       { setError('Date of birth is required.');                      scrollTo('personal');  return; }
-    if (!form.streetAddress.trim()) { setError('Street address is required for Sandata EVV registration.'); scrollTo('personal'); return; }
-    if (!form.city.trim())          { setError('City is required for Sandata EVV registration.');           scrollTo('personal'); return; }
-    if (!form.zipCode.trim())       { setError('ZIP code is required for Sandata EVV registration.');       scrollTo('personal'); return; }
-    if (!form.medicaidId.trim()) { setError('Medicaid ID is required.');                        scrollTo('insurance'); return; }
-    if (!/^\d{10}$/.test(form.medicaidId.replace(/\D/g, ''))) { setError('Medicaid ID must be exactly 10 digits.'); scrollTo('insurance'); return; }
-    if (!form.procedureCode)     { setError('Service Code (Procedure Code) is required for Sandata EVV registration.'); scrollTo('auth'); return; }
+    for (const section of SECTIONS) {
+      const message = validateStep(section.id);
+      if (message) { setError(message); scrollTo(section.id); return; }
+    }
 
     setSaving(true);
 
@@ -118,7 +180,7 @@ export default function NewClientPage() {
       middle_name:    form.middleName.trim() || null,
       last_name:      form.lastName.trim(),
       date_of_birth:  form.dateOfBirth,
-      medicaid_id:    form.medicaidId.trim(),
+      medicaid_id:    form.medicaidId.replace(/\D/g, ''),
       gender:         form.gender || null,
       ssn_last4:      form.ssnLast4.trim() || null,
       phone:          form.phone.trim() || null,
@@ -138,13 +200,19 @@ export default function NewClientPage() {
       });
 
       if (res.status === 201) {
+        try { if (draftKey) sessionStorage.removeItem(draftKey); } catch { /* Client was saved successfully. */ }
         const data = await res.json().catch(() => ({}));
         const sandataNote = data.sandata_status
           ? ` Sandata simulator: ${data.sandata_status}.`
           : '';
         setSuccess(`${data.message ?? 'Client saved.'}${sandataNote}`);
-        setSaving(false);
-        setTimeout(() => router.push('/clients'), 1800);
+        try {
+          await refreshClientsAfterSave();
+        } catch {
+          // The client is already saved; clear local route state if revalidation fails.
+          router.refresh();
+        }
+        router.push('/clients');
         return;
       }
 
@@ -157,7 +225,8 @@ export default function NewClientPage() {
   }
 
   return (
-    <ProtectedLayout>
+    <ProtectedLayout className={styles.shell}>
+      <div className={styles.wizard}>
       {/* Topbar */}
       <div className="topbar" style={{ marginBottom: 16 }}>
         <div>
@@ -166,48 +235,40 @@ export default function NewClientPage() {
             <span>›</span>
             <span style={{ color: 'var(--text)', fontWeight: 600 }}>Add New Client</span>
           </div>
-          <h1 className="page-title">Add New Client</h1>
+          {/* <h1 className="page-title">Add New Client</h1> */}
           <p className="page-subtitle">Complete all required sections before saving the client record.</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {error && (
-            <span style={{ fontSize: 12, color: '#dc2626', maxWidth: 420, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{error}</span>
-          )}
-          {success && (
-            <span style={{ fontSize: 12, color: '#15803d', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 4, padding: '4px 10px' }}>
-              {success}
-            </span>
-          )}
-          <Link href="/clients" className="btn secondary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-            Cancel
-          </Link>
-          <button className="btn" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save & Add Client'}
-          </button>
         </div>
       </div>
 
-      <div className="form-page-grid">
-        {/* Left nav */}
-        <div className="form-nav">
-          {SECTIONS.map(({ id, step, label }) => (
-            <div
+      <nav className={styles.steps} aria-label="Client intake steps">
+          {SECTIONS.map(({ id, step, label }, index) => (
+            <button
               key={id}
-              className={`form-nav-item${activeSection === id ? ' active' : ''}`}
-              style={{ cursor: 'pointer' }}
-              onClick={() => scrollTo(id)}
+              type="button"
+              className={`${styles.step} ${activeSection === id ? styles.active : ''} ${completed.includes(id) ? styles.complete : ''}`}
+              aria-current={activeSection === id ? 'step' : undefined}
+              disabled={saving}
+              onClick={() => goToStep(index)}
             >
-              <div className="form-nav-step">{step}</div>
-              {label}
-            </div>
+              <span className={styles.stepNumber}>{completed.includes(id) && activeSection !== id ? '✓' : step}</span>
+              <span>{label}</span>
+              {index < SECTIONS.length - 1 && <span className={styles.connector} />}
+            </button>
           ))}
-        </div>
+      </nav>
 
+      <div className={styles.grid}>
         {/* Form body */}
-        <div>
+        <div className={styles.formBody}>
+          <div className={styles.fields}>
+          <div ref={headingRef} tabIndex={-1} className={styles.stepIntro}>
+            Step {activeIndex + 1} of {SECTIONS.length} · {SECTIONS[activeIndex].label}
+          </div>
+          {error && <div role="alert" className={styles.error}>{error}</div>}
+          {success && <div role="status" className={styles.success}>{success}</div>}
 
           {/* ── 1. Personal Information ───────────── */}
-          <div id="sec-personal" className="form-section-card">
+          <div id="sec-personal" hidden={activeSection !== 'personal'} className="form-section-card">
             <div className="form-section-heading">Personal Information</div>
             <div className="form-section-sub">Basic demographic and contact details for the client record.</div>
 
@@ -330,7 +391,7 @@ export default function NewClientPage() {
           </div>
 
           {/* ── 2. Insurance & Payer ──────────────── */}
-          <div id="sec-insurance" className="form-section-card">
+          <div id="sec-insurance" hidden={activeSection !== 'insurance'} className="form-section-card">
             <div className="form-section-heading">Insurance &amp; Payer</div>
             <div className="form-section-sub">Medicaid, waiver program, and managed care enrollment details.</div>
 
@@ -343,7 +404,7 @@ export default function NewClientPage() {
               </div>
               <div className="form-field">
                 <label className="form-label">Payer</label>
-                <select className="form-select">
+                <select className="form-select" value={form.payer} onChange={set('payer')}>
                   <option>Pennsylvania Medicaid (MA)</option>
                   <option>Medicare Part A</option>
                   <option>Private Insurance</option>
@@ -363,7 +424,7 @@ export default function NewClientPage() {
               </div>
               <div className="form-field">
                 <label className="form-label">Managed Care Plan</label>
-                <select className="form-select">
+                <select className="form-select" value={form.managedCarePlan} onChange={set('managedCarePlan')}>
                   <option value="">Select…</option>
                   <option>Community HealthChoices (CHC)</option>
                   <option>Fee-for-Service</option>
@@ -373,7 +434,7 @@ export default function NewClientPage() {
           </div>
 
           {/* ── 3. Service Authorization ──────────── */}
-          <div id="sec-auth" className="form-section-card">
+          <div id="sec-auth" hidden={activeSection !== 'auth'} className="form-section-card">
             <div className="form-section-heading">Service Authorization</div>
             <div className="form-section-sub">Authorized PA ODP services and unit allocations for this client.</div>
 
@@ -425,7 +486,7 @@ export default function NewClientPage() {
           </div>
 
           {/* ── 4. Care Plan ──────────────────────── */}
-          <div id="sec-careplan" className="form-section-card">
+          <div id="sec-careplan" hidden={activeSection !== 'careplan'} className="form-section-card">
             <div className="form-section-heading">Care Plan</div>
             <div className="form-section-sub">Initial care plan assignment and coordinator details.</div>
 
@@ -474,9 +535,10 @@ export default function NewClientPage() {
           </div>
 
           {/* ── 5. Documents ──────────────────────── */}
-          <div id="sec-documents" className="form-section-card">
+          <div id="sec-documents" hidden={activeSection !== 'documents'} className="form-section-card">
             <div className="form-section-heading">Documents</div>
-            <div className="form-section-sub">Upload supporting documents for the client record.</div>
+            <div className="form-section-sub">Review the supporting documents for your intake.</div>
+            <p className={styles.notice}>Document uploads are not available yet. You can create the client without documents.</p>
 
             {[
               ['Care Plan Document', 'PDF or Word (.pdf, .doc, .docx)'],
@@ -493,21 +555,53 @@ export default function NewClientPage() {
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>{label}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)' }}>{hint}</div>
                 </div>
-                <button className="btn secondary" style={{ fontSize: 11, height: 28 }}>Choose File</button>
+                <span className={styles.badge}>Optional</span>
               </div>
             ))}
           </div>
 
+          </div>
           {/* Footer actions */}
-          <div className="form-footer">
-            <Link href="/clients" className="btn secondary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-              Cancel
-            </Link>
-            <button className="btn" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : 'Save & Add Client'}
-            </button>
+          <div className={styles.footer}>
+            <button type="button" className="btn secondary" disabled={activeIndex === 0 || saving} onClick={() => goToStep(activeIndex - 1)}>Back</button>
+            <div className={styles.footerActions}>
+              <Link href="/clients" className="btn secondary" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', pointerEvents: saving ? 'none' : undefined }} aria-disabled={saving}>Cancel</Link>
+              <button type="button" className="btn secondary" disabled={saving} onClick={saveDraft}>Save Draft</button>
+              {activeIndex < SECTIONS.length - 1 ? (
+                <button type="button" className="btn" onClick={() => goToStep(activeIndex + 1)}>Continue to {SECTIONS[activeIndex + 1].label}</button>
+              ) : (
+                <button type="button" className="btn" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save & Add Client'}</button>
+              )}
+            </div>
           </div>
         </div>
+        <aside className={styles.aside} aria-label="Intake checklist">
+          <section className={styles.sideCard}>
+            <h2>Intake Checklist</h2>
+            <p>Track each section of the client record.</p>
+            <ul className={styles.checklist}>
+              {SECTIONS.map(({ id, label }, index) => {
+                const status = activeSection === id ? 'In progress' : completed.includes(id) ? 'Complete' : 'Not started';
+                return <li key={id}>
+                  <button type="button" disabled={saving} onClick={() => goToStep(index)}>{label}</button>
+                  <span className={`${styles.badge} ${status === 'In progress' ? styles.inProgress : status === 'Complete' ? styles.done : ''}`}>{status}</span>
+                </li>;
+              })}
+            </ul>
+          </section>
+          <section className={styles.sideCard}>
+            <h2>Required to Save</h2>
+            <p>Have these details ready to complete the client record.</p>
+            <ul className={styles.requirements}>
+              <li>First &amp; last name</li>
+              <li>Date of birth</li>
+              <li>Street address, city &amp; ZIP</li>
+              <li>Medicaid ID (MA number)</li>
+              <li>Service code</li>
+            </ul>
+          </section>
+        </aside>
+      </div>
       </div>
     </ProtectedLayout>
   );

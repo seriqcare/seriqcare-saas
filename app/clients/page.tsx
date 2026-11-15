@@ -3,6 +3,7 @@ import { ProtectedLayout } from '@/components/protected-layout';
 import { HeaderUser } from '@/components/topbar';
 import { getClients } from '@/lib/queries/clients';
 import { QuerySearchInput } from '@/components/query-search-input';
+import { CLIENT_QUICK_ACTIONS } from '@/lib/client-quick-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,7 @@ export default async function ClientsPage({
         <div className="top-actions">
           <QuerySearchInput placeholder="Search name, caregiver, or MA ID..." />
           <button className="btn secondary">Export</button>
-          <Link href="/clients/new" className="btn" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Link href="/clients/new" prefetch={true} className="btn" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.2">
               <path d="M7 1v12M1 7h12"/>
             </svg>
@@ -184,13 +185,8 @@ export default async function ClientsPage({
           <div className="card">
             <div className="card-title" style={{ marginBottom: 10 }}>Quick Actions</div>
             <div style={{ display: 'grid', gap: 8 }}>
-              {[
-                ['+ Add New Client',  '/clients/new'],
-                ['View Visits / EVV',  '/visits'],
-                ['Schedule a Visit',  '/schedule'],
-                ['Review Timesheets', '/timesheets'],
-              ].map(([label, href]) => (
-                <Link key={href} href={href} style={{ display: 'block', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-soft)' }}>
+              {CLIENT_QUICK_ACTIONS.map(({ label, href }) => (
+                <Link key={href} href={href} prefetch={href === '/clients/new' ? true : undefined} style={{ display: 'block', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-soft)' }}>
                   {label}
                 </Link>
               ))}

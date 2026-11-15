@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { getCaregivers } from '@/lib/queries/caregivers';
 import { CaregiverDetail } from '@/components/caregiver-detail';
+import intakeStyles from '@/components/intake-wizard.module.css';
+import styles from '@/components/caregiver-detail.module.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,9 +39,10 @@ export default async function CaregiverDetailPage({
   }
 
   return (
-    <ProtectedLayout>
+    <ProtectedLayout className={intakeStyles.shell}>
+      <div className={styles.page}>
       {/* ── Breadcrumb topbar ────────────────────────── */}
-      <div className="topbar" style={{ marginBottom: 16 }}>
+      <div className={`topbar ${styles.topbar}`}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
           <Link href="/caregivers" style={{ color: 'var(--muted)', textDecoration: 'none' }}>Caregivers</Link>
           <span>›</span>
@@ -47,9 +50,9 @@ export default async function CaregiverDetailPage({
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Link
-            href={`/schedule?employee=${caregiver.id}`}
+            href={`/schedule?caregiver=${caregiver.id}`}
             className="btn secondary"
-            style={{ fontSize: 12, height: 32, display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}
+            style={{ fontSize: 11, height: 26, padding: '0 9px', display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}
           >
             View Schedule
           </Link>
@@ -57,6 +60,7 @@ export default async function CaregiverDetailPage({
       </div>
 
       <CaregiverDetail caregiver={caregiver} />
+      </div>
     </ProtectedLayout>
   );
 }

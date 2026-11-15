@@ -12,6 +12,7 @@ import { AGGREGATOR_SANDATA_KEY, AGGREGATOR_HHAX_KEY } from '@/components/aggreg
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
 type Tab = 'general' | 'notifications' | 'billing' | 'security' | 'payroll' | 'integrations';
+type MobileCaregiverOption = { employee_id: number; name: string; employee_code: string; username: string | null };
 type IntegrationFilter = 'all' | 'payroll' | 'aggregator' | 'hr';
 
 const PAY_TYPE_OPTIONS = ['Hourly', 'Per Visit'] as const;
@@ -476,6 +477,25 @@ function SettingsPageContent() {
   const [mobileBusy, setMobileBusy] = useState(false);
   const [mobileMsg, setMobileMsg] = useState('');
   const [mobileErr, setMobileErr] = useState('');
+  const [mobileCaregivers, setMobileCaregivers] = useState<MobileCaregiverOption[]>([]);
+  const [mobileCaregiversLoading, setMobileCaregiversLoading] = useState(false);
+  const [mobileCaregiversError, setMobileCaregiversError] = useState('');
+
+  useEffect(() => {
+    if (tab !== 'security') return;
+    let active = true;
+    setMobileCaregiversLoading(true);
+    setMobileCaregiversError('');
+    apiFetch('/api/caregivers/mobile-users')
+      .then(async response => {
+        if (!response.ok) throw new Error('Could not load caregivers.');
+        const options: MobileCaregiverOption[] = await response.json();
+        if (active) setMobileCaregivers(options);
+      })
+      .catch(error => { if (active) setMobileCaregiversError(error instanceof Error ? error.message : 'Could not load caregivers.'); })
+      .finally(() => { if (active) setMobileCaregiversLoading(false); });
+    return () => { active = false; };
+  }, [tab, apiFetch]);
 
   /* Payroll provider */
   const [payrollProvider,      setPayrollProvider]      = useState<ProviderId>('universal');
@@ -569,6 +589,8 @@ function SettingsPageContent() {
     if (searchParams.get('tab') === 'aggregator') {
       setTab('integrations');
       setTimeout(() => aggregatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    } else if (searchParams.get('tab') === 'security') {
+      setTab('security');
     }
   }, [searchParams]);
 
@@ -817,6 +839,7 @@ function SettingsPageContent() {
   const handleMobileReset = async (e: FormEvent) => {
     e.preventDefault();
     setMobileErr(''); setMobileMsg('');
+    if (!mobile.username || !mobileCaregivers.some(caregiver => caregiver.username === mobile.username)) { setMobileErr('Select a caregiver with an active mobile account.'); return; }
     if (mobile.newPassword !== mobile.confirmPassword) { setMobileErr('Passwords do not match.'); return; }
     if (mobile.newPassword.length < 8) { setMobileErr('Password must be at least 8 characters.'); return; }
     setMobileBusy(true);
@@ -1082,7 +1105,7 @@ function SettingsPageContent() {
               </form>
             </div>
 
-            <div className="card">
+            <div className="card" id="mobile-app-users">
               <div className="card-header" style={{ marginBottom: 14 }}>
                 <div>
                   <div className="card-title">Mobile App Users</div>
@@ -1092,8 +1115,15 @@ function SettingsPageContent() {
               </div>
               <form onSubmit={handleMobileReset} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div className="info-field">
-                  <div className="info-label">Caregiver Username</div>
-                  <input className="input" placeholder="e.g. sarah.mills" value={mobile.username} required onChange={e => setMobile(m => ({ ...m, username: e.target.value }))} />
+                  <label className="info-label" htmlFor="mobile-caregiver">Caregiver</label>
+                  <select id="mobile-caregiver" className="form-select" value={mobile.username} required disabled={mobileBusy || mobileCaregiversLoading || !!mobileCaregiversError} onChange={e => { setMobile({ username: e.target.value, newPassword: '', confirmPassword: '' }); setMobileErr(''); setMobileMsg(''); }}>
+                    <option value="">{mobileCaregiversLoading ? 'Loading caregivers…' : 'Select a caregiver…'}</option>
+                    {mobileCaregivers.map(caregiver => <option key={caregiver.employee_id} value={caregiver.username ?? `unavailable-${caregiver.employee_id}`} disabled={!caregiver.username}>
+                      {caregiver.name} · {caregiver.employee_code} · {caregiver.username ?? 'No active mobile account'}
+                    </option>)}
+                  </select>
+                  {mobileCaregiversError && <ErrorBanner msg={mobileCaregiversError} />}
+                  {!mobileCaregiversLoading && !mobileCaregiversError && mobileCaregivers.length === 0 && <div className="form-hint">No caregivers are available.</div>}
                 </div>
                 <hr className="form-divider" style={{ margin: '2px 0 4px' }} />
                 <div className="info-field">
@@ -1106,7 +1136,7 @@ function SettingsPageContent() {
                 </div>
                 {mobileErr && <ErrorBanner msg={mobileErr} />}
                 {mobileMsg && <SuccessBanner msg={mobileMsg} />}
-                <button className="btn" type="submit" disabled={mobileBusy} style={{ marginTop: 2 }}>{mobileBusy ? 'Resetting…' : 'Reset Password'}</button>
+                <button className="btn" type="submit" disabled={mobileBusy || !mobile.username || mobileCaregiversLoading || !!mobileCaregiversError} style={{ marginTop: 2 }}>{mobileBusy ? 'Resetting…' : 'Reset Password'}</button>
               </form>
             </div>
           </div>

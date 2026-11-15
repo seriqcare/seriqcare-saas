@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 
 import { useAuth } from '@/components/auth-context';
 import { createSchedule, updateSchedule } from '@/lib/queries/schedule';
+import { refreshScheduleAfterSave } from '@/app/schedule/actions';
+import { scheduleUrlAfterSave } from '@/lib/schedule-navigation';
 
 interface ShiftDraft {
   id: number;
@@ -25,6 +27,7 @@ interface Props {
   compact?: boolean;
   linkLabel?: string;
   shift?: ShiftDraft;
+  assignmentMode?: boolean;
 }
 
 function parseDateTime(value: string) {
@@ -44,12 +47,12 @@ function toInputTime(date: Date) {
   return `${hours}:${minutes}`;
 }
 
-export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceCodes, compact = false, linkLabel, shift }: Props) {
+export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceCodes, compact = false, linkLabel, shift, assignmentMode = false }: Props) {
   const router = useRouter();
   const { user } = useAuth();
   const isEdit = Boolean(shift);
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(assignmentMode);
   const [date, setDate] = useState(defaultDate);
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('11:00');
@@ -59,6 +62,10 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+
+  useEffect(() => {
+    if (assignmentMode) setOpen(true);
+  }, [assignmentMode]);
 
   function hydrateForm() {
     if (shift) {
@@ -89,9 +96,14 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
   }, [open, defaultDate, shift]);
 
   async function handleSave() {
+    if (saving) return;
     setSaveError('');
     if (!clientId || !date) {
       setSaveError('Client and date are required.');
+      return;
+    }
+    if (assignmentMode && !employeeId) {
+      setSaveError('Please select a caregiver to assign.');
       return;
     }
     if (!serviceType) {
@@ -116,10 +128,14 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
       }
 
       setSaved(true);
-      router.refresh();
-      setTimeout(() => {
-        setOpen(false);
-      }, 350);
+      try {
+        await refreshScheduleAfterSave();
+      } catch {
+        // The shift is already saved. Refresh the UI without replaying the write.
+        router.refresh();
+      }
+      router.replace(scheduleUrlAfterSave(window.location.search, date, payload.client_id, payload.employee_id), { scroll: false });
+      setOpen(false);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Failed to save shift.');
     } finally {
@@ -174,7 +190,7 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
           <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.2">
             <path d="M7 1v12M1 7h12" />
           </svg>
-          {isEdit ? 'Edit Shift' : 'New Shift'}
+          {isEdit ? 'Edit Shift' : assignmentMode ? 'Assign Caregiver' : 'New Shift'}
         </button>
       )}
 
@@ -207,8 +223,8 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>{isEdit ? 'Edit Shift' : 'New Shift'}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{isEdit ? 'Update an existing caregiver visit' : 'Schedule a new caregiver visit'}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)' }}>{isEdit ? 'Edit Shift' : assignmentMode ? 'Assign Caregiver' : 'New Shift'}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{isEdit ? 'Update an existing caregiver visit' : assignmentMode ? 'Choose a client, caregiver, and visit time' : 'Schedule a new caregiver visit'}</div>
               </div>
               <button
                 type="button"
@@ -229,9 +245,9 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
               </div>
 
               <div className="form-field">
-                <label className="form-label">Caregiver</label>
+                <label className="form-label">Caregiver {assignmentMode && <span className="req">*</span>}</label>
                 <select className="form-select" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-                  <option value="">Unassigned / Open shift</option>
+                  <option value="">{assignmentMode ? 'Select caregiver…' : 'Unassigned / Open shift'}</option>
                   {caregivers.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
                 </select>
               </div>

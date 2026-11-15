@@ -72,6 +72,7 @@ export default async function CaregiversPage({
           <button className="btn secondary">Export</button>
           <Link
             href="/caregivers/new"
+            prefetch={true}
             className="btn"
             style={{ display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}
           >
@@ -234,8 +235,8 @@ export default async function CaregiversPage({
           <div className="card">
             <div className="card-title" style={{ marginBottom: 10 }}>Quick Actions</div>
             <div style={{ display: 'grid', gap: 8 }}>
-              {[['View Schedule', '/schedule'], ['Timesheets', '/timesheets'], ['Visits / EVV', '/visits']].map(([label, href]) => (
-                <Link key={href} href={href} style={{ display: 'block', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-soft)' }}>
+              {[['+ Add Caregiver', '/caregivers/new'], ['View Schedule', '/schedule'], ['Timesheets', '/timesheets'], ['Visits / EVV', '/visits']].map(([label, href]) => (
+                <Link key={href} href={href} prefetch={href === '/caregivers/new' ? true : undefined} style={{ display: 'block', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-soft)' }}>
                   {label}
                 </Link>
               ))}

@@ -1,0 +1,47 @@
+.page { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.topbar { flex-shrink: 0; margin-bottom: 10px; flex-direction: row; align-items: center; }
+.detail { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+.hero { flex-shrink: 0; padding: 14px 18px; }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(0, 1.7fr) minmax(0, 1fr); grid-template-areas: 'employment personal' 'mobile evv'; gap: 12px; flex: 1; min-height: 0; }
+.grid > :global(.card) { min-width: 0; min-height: 0; overflow: auto; padding: 14px 18px; overscroll-behavior: contain; }
+.employment { grid-area: employment; }
+.personal { grid-area: personal; }
+.mobile { grid-area: mobile; }
+.evv { grid-area: evv; }
+.sectionHeader { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 9px; }
+.rows { display: grid; gap: 6px; }
+.row { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.payroll { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.mobileTitle { margin-bottom: 10px; }
+.note { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.error { font-size: 12px; color: #944949; }
+.accountActions { display: flex; gap: 6px; }
+.accountActions :global(.btn) { height: 26px; padding: 0 9px; font-size: 11px; }
+.accountEdit { font-size: 11px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border: 1px solid var(--line); border-radius: 5px; padding: 4px 10px; cursor: pointer; }
+.accountEdit:disabled { opacity: .5; cursor: default; }
+.accountFields { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.accountFields label { display: grid; gap: 3px; font-size: 11px; color: var(--muted); min-width: 0; }
+.accountFields :global(.form-input), .accountFields :global(.form-select) { padding: 5px 8px; font-size: 12px; }
+.accountLabel { font-size: 11px; color: var(--muted); font-weight: 600; }
+.accountValue { font-size: 13px; font-weight: 600; }
+.toast { position: fixed; right: max(24px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); z-index: 1200; display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100vw - 32px); padding: 12px 14px; border: 1px solid #bddbbf; border-radius: 8px; background: #edf7ef; color: #35693c; font-size: 13px; box-shadow: 0 4px 18px rgba(2, 20, 37, .15); }
+.toast button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 20px; padding: 2px 6px; }
+@media (max-height: 800px) {
+  .hero { padding: 10px 14px; }
+  .detail, .grid { gap: 10px; }
+  .grid > :global(.card) { padding: 10px 14px; }
+  .rows { gap: 4px; }
+  .row { padding-bottom: 3px; }
+  .row > div:last-child { font-size: 12px !important; }
+  .payroll { margin-top: 8px; padding-top: 8px; }
+  .sectionHeader { margin-bottom: 6px; }
+}
+@media (max-width: 900px) {
+  .row { grid-template-columns: minmax(90px, .8fr) minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: 'employment' 'personal' 'evv' 'mobile'; overflow-y: auto; align-content: start; }
+  .grid > :global(.card) { overflow: visible; }
+  .stats { gap: 6px; }
+}

@@ -350,6 +350,38 @@ class VisitSubmitResponse(BaseModel):
 # Caregivers
 # ---------------------------------------------------------------------------
 
+class CaregiverMobileAccount(BaseModel):
+    username: str
+    display_name: Optional[str] = None
+    email: Optional[str] = None
+    is_active: bool
+    has_password: bool
+
+
+class CaregiverAccountDetails(BaseModel):
+    employee_id: int
+    phone: Optional[str] = None
+    sandata_employee_id: Optional[str] = None
+    hhax_employee_id: Optional[str] = None
+    npi: Optional[str] = None
+    mobile_account: Optional[CaregiverMobileAccount] = None
+
+
+class CaregiverMobileAccountUpdate(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    display_name: Optional[str] = Field(default=None, max_length=200)
+    email: Optional[str] = Field(default=None, max_length=200)
+    is_active: bool = True
+    new_password: Optional[str] = Field(default=None, min_length=8, max_length=72)
+
+
+class CaregiverMobileUserOption(BaseModel):
+    employee_id: int
+    name: str
+    employee_code: str
+    username: Optional[str] = None
+
+
 class CaregiverCreateRequest(BaseModel):
     employee_code: str
     first_name: str
