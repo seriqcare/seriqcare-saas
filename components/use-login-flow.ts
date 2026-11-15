@@ -13,7 +13,8 @@ export function useLoginFlow() {
     active.current?.abort();
   }, []);
 
-  const submit = useCallback(async (username: string, password: string, cfToken?: string): Promise<SignInResult | null> => {
+  const submit = useCallback(async (agencyCode: string, username: string, password: string, cfToken?: string): Promise<SignInResult | null> => {
+    if (!agencyCode.trim()) return { ok: false, error: 'Agency code is required.' };
     if (active.current) return null;
     const controller = new AbortController();
     active.current = controller;
@@ -22,7 +23,7 @@ export function useLoginFlow() {
       const base = await waitForReadiness(apiBases, controller.signal);
       if (controller.signal.aborted) return null;
       setPhase('signing-in');
-      const result = await signIn(username, password, base, cfToken);
+      const result = await signIn(agencyCode, username, password, base, cfToken);
       return controller.signal.aborted ? null : result;
     } catch (error) {
       if (controller.signal.aborted) return null;

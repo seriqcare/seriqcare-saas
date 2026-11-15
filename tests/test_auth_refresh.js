@@ -86,10 +86,28 @@ test('expired clock sessions stay on the mobile sign-in screen', async () => {
 async function signedIn() {
   const h = harness();
   await settle();
-  assert.equal((await h.auth.signIn('user', 'password', h.auth.apiBases[0])).ok, true);
+  assert.equal((await h.auth.signIn('ACME', 'user', 'password', h.auth.apiBases[0])).ok, true);
   h.calls.length = 0;
   return h;
 }
+
+test('login submits the normalized agency code with username and password', async () => {
+  const h = harness();
+  await settle();
+  await h.auth.signIn(' acme ', ' user ', 'password', h.auth.apiBases[0]);
+  const login = h.calls.find(call => call.url.endsWith('/api/auth/login'));
+  const body = JSON.parse(login.init.body);
+  assert.equal(body.agency_code, 'ACME');
+  assert.equal(body.username, 'user');
+  assert.equal(body.password, 'password');
+});
+
+test('an empty agency code prevents login before making a request', async () => {
+  const h = harness();
+  await settle();
+  assert.equal((await h.auth.signIn(' ', 'user', 'password', h.auth.apiBases[0])).ok, false);
+  assert.equal(h.calls.filter(call => call.url.endsWith('/api/auth/login')).length, 0);
+});
 
 test('local API follows browser hostname while remote APIs retain their host', () => {
   assert.equal(harness('localhost').auth.apiBases[0], 'http://localhost:8000');

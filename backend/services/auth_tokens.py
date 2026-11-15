@@ -41,7 +41,19 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def make_access_token(user, jti: str) -> str:
+def generate_agency_refresh_token(agency_id: int | None) -> str:
+    # The full value is verified against its stored hash before inspecting this
+    # binding. Changing the tenant prefix therefore invalidates the token.
+    binding = f't-{agency_id}' if agency_id is not None else 'platform'
+    return f'{binding}.{generate_refresh_token()}'
+
+
+def refresh_token_matches_agency(token: str, agency_id: int | None) -> bool:
+    binding = f't-{agency_id}' if agency_id is not None else 'platform'
+    return token.startswith(f'{binding}.')
+
+
+def make_access_token(user, jti: str, agency_code: str | None = None) -> str:
     """Create a 10-minute access JWT containing the standard SeriqCare claims."""
     now = datetime.utcnow()
     payload = {
@@ -49,6 +61,7 @@ def make_access_token(user, jti: str) -> str:
         "user_id": user.id,
         "role": user.role,
         "agency_id": user.agency_id,
+        "agency_code": agency_code,
         "employee_id": user.employee_id,
         "jti": jti,
         "iat": now,

@@ -37,16 +37,17 @@ def get_my_profile(
 ):
     """Return the authenticated user's profile and today's schedule count."""
     schedule_count = 0
-    if current_user.employee_id:
+    if current_user.employee_id and current_user.agency_id is not None:
         row = db.execute(
             text("""
                 SELECT COUNT(*) AS cnt
                 FROM   care.schedules
                 WHERE  employee_id = :emp_id
+                  AND  agency_id = :agency_id
                   AND  CAST(scheduled_start AS DATE) = :today
                   AND  status <> 'Cancelled'
             """),
-            {"emp_id": current_user.employee_id, "today": date.today()},
+            {"emp_id": current_user.employee_id, "agency_id": current_user.agency_id, "today": date.today()},
         ).fetchone()
         if row:
             schedule_count = row.cnt

@@ -13,6 +13,7 @@ export type AuthUser = {
   display_name: string | null;
   role: 'caregiver' | 'coordinator' | 'agency_admin' | 'super_admin';
   agency_id: number | null;
+  agency_code: string | null;
   employee_id: number | null;
   agency_tier: string | null;       // 'core' | 'evv' | 'evvplus' | null (super_admin)
   agency_aggregator: string | null; // 'sandata' | 'hhax' | null
@@ -23,7 +24,7 @@ export type SignInResult = { ok: true } | { ok: false; error: string; retryAfter
 type AuthContextType = {
   user: AuthUser | null;
   isLoading: boolean;
-  signIn: (username: string, password: string, base: string, cfToken?: string) => Promise<SignInResult>;
+  signIn: (agencyCode: string, username: string, password: string, base: string, cfToken?: string) => Promise<SignInResult>;
   apiBases: string[];
   signOut: () => void;
   /** Authenticated fetch — adds Bearer token, silently refreshes on 401. */
@@ -201,6 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           display_name: data.display_name,
           role: data.role,
           agency_id: data.agency_id,
+          agency_code: data.agency_code ?? null,
           employee_id: data.employee_id,
           agency_tier: data.agency_tier ?? null,
           agency_aggregator: data.agency_aggregator ?? null,
@@ -357,13 +359,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ---------------------------------------------------------------------------
   // signIn
   // ---------------------------------------------------------------------------
-  const signIn = useCallback(async (username: string, password: string, base: string, cfToken?: string): Promise<SignInResult> => {
+  const signIn = useCallback(async (agencyCode: string, username: string, password: string, base: string, cfToken?: string): Promise<SignInResult> => {
+    if (!agencyCode.trim()) return { ok: false, error: 'Agency code is required.' };
     try {
       const res = await fetchWithTimeout(`${base}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',   // receive HttpOnly refresh token cookie
-        body: JSON.stringify({ username, password, client_type: 'web', ...(cfToken ? { cf_turnstile_token: cfToken } : {}) }),
+        body: JSON.stringify({ agency_code: agencyCode.trim().toUpperCase(), username: username.trim(), password, client_type: 'web', ...(cfToken ? { cf_turnstile_token: cfToken } : {}) }),
       }, AUTH_TIMEOUT_MS);
 
       if (!res.ok) {
@@ -391,6 +394,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         display_name: data.display_name,
         role: data.role,
         agency_id: data.agency_id,
+        agency_code: data.agency_code ?? null,
         employee_id: data.employee_id,
         agency_tier: data.agency_tier ?? null,
         agency_aggregator: data.agency_aggregator ?? null,

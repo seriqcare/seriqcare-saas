@@ -69,7 +69,7 @@ def _get_schedule_with_access_check(
             SELECT s.id, s.client_id, s.employee_id, s.agency_id,
                    c.first_name + ' ' + c.last_name AS client_name
             FROM   care.schedules s
-            JOIN   care.clients   c ON c.id = s.client_id
+            JOIN   care.clients   c ON c.id = s.client_id AND c.agency_id = s.agency_id
             WHERE  s.id = :sid
         """),
         {"sid": schedule_id},
@@ -79,12 +79,14 @@ def _get_schedule_with_access_check(
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     if current_user.role == "caregiver":
-        if schedule.employee_id != current_user.employee_id:
+        if (current_user.agency_id is None or schedule.agency_id != current_user.agency_id
+                or current_user.employee_id is None or schedule.employee_id != current_user.employee_id):
             raise HTTPException(status_code=403, detail="Access denied")
     elif current_user.role in ("coordinator", "agency_admin"):
-        if schedule.agency_id != current_user.agency_id:
+        if current_user.agency_id is None or schedule.agency_id != current_user.agency_id:
             raise HTTPException(status_code=403, detail="Access denied")
-    # super_admin: unrestricted
+    elif current_user.role != 'super_admin':
+        raise HTTPException(status_code=403, detail='Access denied')
 
     return schedule
 

@@ -937,6 +937,7 @@ function Row({ label, value }: { label: string; value: string }) {
 function MobileLoginScreen() {
   const { isLoading } = useAuth();
   const { phase, submit } = useLoginFlow();
+  const [agencyCode, setAgencyCode] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -945,9 +946,9 @@ function MobileLoginScreen() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy || !username.trim() || !password) return;
+    if (busy || !agencyCode.trim() || !username.trim() || !password) return;
     setError('');
-    const result = await submit(username.trim(), password);
+    const result = await submit(agencyCode, username.trim(), password);
     if (!result) return;
     if (!result.ok) setError(result.error);
   };
@@ -977,6 +978,8 @@ function MobileLoginScreen() {
         </div>
 
         <form onSubmit={handleSubmit} style={{ background: '#fff', borderRadius: 20, border: '1px solid #cfd7e2', padding: 16, boxShadow: '0 2px 6px rgba(33, 43, 61, 0.1)' }}>
+          <InputField icon={<IconInfo />} placeholder="Agency Code" value={agencyCode} onChange={setAgencyCode} />
+          <div style={{ height: 12 }} />
           <InputField icon={<IconUser />} placeholder="Username" value={username} onChange={setUsername} />
           <div style={{ height: 12 }} />
           <InputField icon={<IconLock />} placeholder="Password" type={showPw ? 'text' : 'password'} value={password} onChange={setPassword} endAdornment={
@@ -998,18 +1001,18 @@ function MobileLoginScreen() {
 
           <button
             type="submit"
-            disabled={busy || !username.trim() || !password}
+            disabled={busy || !agencyCode.trim() || !username.trim() || !password}
             style={{
               marginTop: 14,
               width: '100%',
               border: 'none',
               borderRadius: 20,
               padding: '14px 12px',
-              background: busy || !username.trim() || !password ? '#9bb8d7' : '#2f6ea8',
+              background: busy || !agencyCode.trim() || !username.trim() || !password ? '#9bb8d7' : '#2f6ea8',
               color: '#fff',
               fontSize: 16,
               fontWeight: 700,
-              cursor: busy || !username.trim() || !password ? 'default' : 'pointer',
+              cursor: busy || !agencyCode.trim() || !username.trim() || !password ? 'default' : 'pointer',
             }}
           >
             {phase === 'connecting' ? 'Connecting…' : phase === 'signing-in' ? 'Signing in…' : 'Sign In'}
@@ -1050,7 +1053,9 @@ function InputField({
         className={styles.input}
         aria-label={placeholder}
         name={placeholder.toLowerCase()}
-        autoComplete={placeholder === 'Password' ? 'current-password' : 'username'}
+        autoComplete={placeholder === 'Password' ? 'current-password' : placeholder === 'Agency Code' ? 'organization' : 'username'}
+        required
+        maxLength={placeholder === 'Agency Code' ? 20 : undefined}
         autoCapitalize="none"
         autoCorrect="off"
         type={type}

@@ -39,22 +39,24 @@ load_dotenv()
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel
-from sqlalchemy import text
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import require_role
+from backend.auth.tenant import verified_user_agency
 from backend.services.auth_tokens import (
     ACCESS_TOKEN_MINUTES,
     REFRESH_GRACE_WINDOW_SECONDS,
     REFRESH_TOKEN_DAYS,
-    generate_refresh_token,
+    generate_agency_refresh_token,
+    refresh_token_matches_agency,
     hash_token,
     make_access_token,
 )
 from db.audit import write_audit
 from db.database import get_db
-from db.models import DeviceSession, PasswordResetToken, User, UserSession
+from db.models import Agency, DeviceSession, PasswordResetToken, User, UserSession
 
 log = logging.getLogger("seriqcare.auth")
 
@@ -163,11 +165,20 @@ _bearer = HTTPBearer(auto_error=False)
 # Schemas
 # ---------------------------------------------------------------------------
 class LoginRequest(BaseModel):
+    agency_code: str = Field(min_length=1, max_length=20)
     username: str
     password: str
     client_type: str = "web"         # "web" | "mobile"
     device_id: str | None = None     # client-generated UUID; generated server-side if absent
     device_name: str | None = None   # "Pixel 8", "Chrome on Windows", …
+
+    @field_validator('agency_code')
+    @classmethod
+    def normalize_agency_code(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not value:
+            raise ValueError('Agency code is required.')
+        return value
 
 
 class LoginResponse(BaseModel):
@@ -178,6 +189,7 @@ class LoginResponse(BaseModel):
     display_name: str | None
     role: str
     agency_id: int | None
+    agency_code: str | None = None
     employee_id: int | None
     agency_tier: str | None = None
     agency_aggregator: str | None = None
@@ -281,6 +293,7 @@ def _issue_tokens(
     """
     now = datetime.utcnow()
     jti = str(uuid.uuid4())
+    agency = verified_user_agency(db, user)
     access_expires = now + timedelta(minutes=ACCESS_TOKEN_MINUTES)
     refresh_expires = now + timedelta(days=REFRESH_TOKEN_DAYS)
 
@@ -306,7 +319,7 @@ def _issue_tokens(
         old.revoked_at = now
         old.revoke_reason = "replaced"
 
-    rt_plain = generate_refresh_token()
+    rt_plain = generate_agency_refresh_token(user.agency_id)
     rt_hash  = hash_token(rt_plain)
 
     db.add(DeviceSession(
@@ -323,7 +336,7 @@ def _issue_tokens(
     user.last_login_at = now
     db.commit()
 
-    return make_access_token(user, jti), rt_plain, refresh_expires
+    return make_access_token(user, jti, agency.agency_code if agency else None), rt_plain, refresh_expires
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +354,9 @@ async def login(
     Web   → refresh token set as HttpOnly "seriqcare-rt" cookie.
     Mobile → refresh token returned in JSON body.
     """
-    is_locked, retry_after = _check_lockout(body.username)
+    login_identity = body.username.strip()
+    attempt_key = f'{body.agency_code}:{login_identity.casefold()}'
+    is_locked, retry_after = _check_lockout(attempt_key)
     if is_locked:
         minutes = math.ceil(retry_after / 60)
         raise HTTPException(
@@ -353,17 +368,20 @@ async def login(
     user = _run_with_transient_retry(
         db,
         lambda: (
-            db.query(User).filter(
+            db.query(User).join(Agency, Agency.id == User.agency_id).filter(
                 User.is_active == True,
+                Agency.is_active == True,
+                func.upper(Agency.agency_code) == body.agency_code,
+                User.role != 'super_admin',
             ).filter(
-                (User.email == body.username) | (User.username == body.username)
+                (User.email == login_identity) | (User.username == login_identity)
             ).first()
         ),
     )
     ip = request.client.host if request.client else None
 
     if not user or not _verify_password(body.password, user.password_hash):
-        count, just_locked = _record_failure(body.username)
+        count, just_locked = _record_failure(attempt_key)
         write_audit(
             db,
             table_name="auth",
@@ -387,10 +405,10 @@ async def login(
             await asyncio.sleep(delay)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password.",
+            detail="Invalid agency code, username, or password.",
         )
 
-    _record_success(body.username)
+    _record_success(attempt_key)
 
     client_type = body.client_type if body.client_type in ("web", "mobile") else "web"
     device_id = body.device_id or f"{client_type}-{uuid.uuid4()}"
@@ -422,6 +440,7 @@ async def login(
         role=user.role,
         agency_id=user.agency_id,
         employee_id=user.employee_id,
+        agency_code=body.agency_code,
         agency_tier=agency_tier,
         agency_aggregator=agency_aggregator,
     )
@@ -495,20 +514,24 @@ async def refresh(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
 
+    if not refresh_token_matches_agency(rt_plain, user.agency_id):
+        raise HTTPException(status_code=401, detail='Agency session changed. Please sign in again with your agency code.')
+    agency = verified_user_agency(db, user)
+
     # Issue new access token
     jti = str(uuid.uuid4())
     access_expires = now + timedelta(minutes=ACCESS_TOKEN_MINUTES)
     db.add(UserSession(user_id=user.id, jti=jti, issued_at=now, expires_at=access_expires))
 
     # Rotate refresh token
-    new_rt = generate_refresh_token()
+    new_rt = generate_agency_refresh_token(user.agency_id)
     new_rt_hash = hash_token(new_rt)
     ds.previous_hash = rt_hash   # keep previous for grace window
     ds.token_hash = new_rt_hash
     ds.last_used_at = now
     db.commit()
 
-    new_access = make_access_token(user, jti)
+    new_access = make_access_token(user, jti, agency.agency_code if agency else None)
     agency_tier, agency_aggregator = _get_agency_tier_aggregator(db, user.agency_id)
     payload = {
         "access_token": new_access,
@@ -518,6 +541,7 @@ async def refresh(
         "display_name": user.display_name,
         "role": user.role,
         "agency_id": user.agency_id,
+        "agency_code": agency.agency_code if agency else None,
         "employee_id": user.employee_id,
         "agency_tier": agency_tier,
         "agency_aggregator": agency_aggregator,
@@ -743,9 +767,10 @@ def admin_reset_password(
 
 
 # ---------------------------------------------------------------------------
-# POST /signup — self-service account creation
+# POST /signup — agency administrators provision portal accounts
 # ---------------------------------------------------------------------------
 class SignupRequest(BaseModel):
+    agency_code: str = Field(min_length=1, max_length=20)
     first_name: str
     last_name: str
     username: str
@@ -756,11 +781,19 @@ class SignupRequest(BaseModel):
     device_id: str | None = None
 
 
-@router.post("/signup", response_model=LoginResponse, status_code=201)
+class ProvisionedUserResponse(BaseModel):
+    id: int
+    username: str
+    agency_id: int
+    role: str
+
+
+@router.post("/signup", response_model=ProvisionedUserResponse, status_code=201)
 def signup(
     body: SignupRequest,
     response: Response,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role('agency_admin', 'super_admin')),
 ):
     if len(body.password) < 8:
         raise HTTPException(status_code=422, detail="Password must be at least 8 characters.")
@@ -773,9 +806,12 @@ def signup(
     if existing:
         raise HTTPException(status_code=409, detail=f"Username '{body.username.strip()}' is already taken.")
 
-    from sqlalchemy import text as _text
-    agency_row = db.execute(_text("SELECT TOP 1 id FROM care.agencies WHERE is_active = 1 ORDER BY id")).fetchone()
-    agency_id = int(agency_row.id) if agency_row else None
+    agency_row = db.query(Agency).filter(
+        func.upper(Agency.agency_code) == body.agency_code.strip().upper(), Agency.is_active == True,
+    ).first()
+    if not agency_row or (current_user.role != 'super_admin' and agency_row.id != current_user.agency_id):
+        raise HTTPException(status_code=404, detail='Agency not found.')
+    agency_id = agency_row.id
 
     new_user = User(
         agency_id=agency_id,
@@ -789,18 +825,12 @@ def signup(
     db.add(new_user)
     db.flush()
 
-    device_id = body.device_id or f"web-{uuid.uuid4()}"
-    access_token, rt_plain, rt_expires = _issue_tokens(new_user, db, device_id, None, "web")
-    _set_rt_cookie(response, rt_plain, rt_expires)
-
-    return LoginResponse(
-        access_token=access_token,
+    db.commit()
+    return ProvisionedUserResponse(
+        id=new_user.id,
         username=new_user.username,
-        email=new_user.email,
-        display_name=new_user.display_name,
         role=new_user.role,
         agency_id=new_user.agency_id,
-        employee_id=None,
     )
 
 

@@ -318,13 +318,13 @@ def fix_visit(
     """
     try:
         row = db.execute(
-            text("""
+            text(f"""
                 SELECT v.id, v.service_date, ev.evv_status
                 FROM   care.visits    v
                 JOIN   care.visit_evv ev ON ev.visit_id = v.id
-                WHERE  v.id = :id AND v.visit_cancelled = 0
+                WHERE  v.id = :id AND v.visit_cancelled = 0 AND {scope.sql_filter('v')}
             """),
-            {"id": visit_id},
+            scope.bind({"id": visit_id}),
         ).fetchone()
 
         if not row:

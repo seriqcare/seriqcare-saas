@@ -9,6 +9,7 @@ import TurnstileWidget, { turnstileEnabled } from '@/components/turnstile-widget
 import type { TurnstileInstance } from '@marsidev/react-turnstile';
 
 export default function LoginPage() {
+  const [agencyCode, setAgencyCode] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -52,7 +53,7 @@ export default function LoginPage() {
     }
 
     setError('');
-    const result = await submit(email, password, cfToken || undefined);
+    const result = await submit(agencyCode, email, password, cfToken || undefined);
     if (!result) return;
 
     if (!result.ok) {
@@ -92,16 +93,23 @@ export default function LoginPage() {
 
         <form onSubmit={onSubmit}>
           <div className="form-group">
-            <label className="label" htmlFor="email">Email</label>
+            <label className="label" htmlFor="agency-code">Agency Code</label>
+            <input id="agency-code" name="agency_code" type="text" className="input" placeholder="Your agency code"
+              value={agencyCode} onChange={e => setAgencyCode(e.target.value)} required maxLength={20}
+              disabled={submitting || isLocked} autoComplete="organization" autoCapitalize="characters" spellCheck={false} />
+          </div>
+          <div className="form-group">
+            <label className="label" htmlFor="email">Email or Username</label>
             <input
               id="email"
-              type="email"
+              type="text"
               className="input"
-              placeholder="name@example.com"
+              placeholder="Email or username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={submitting || isLocked}
-              autoComplete="email"
+              autoComplete="username"
+              required
             />
           </div>
 
@@ -122,6 +130,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={submitting || isLocked}
                 autoComplete="current-password"
+                required
               />
               <button
                 type="button"
@@ -169,7 +178,7 @@ export default function LoginPage() {
             className="btn"
             type="submit"
             style={{ width: '100%', height: 42, marginTop: 14 }}
-            disabled={submitting || isLocked || (turnstileEnabled && !cfToken)}
+            disabled={submitting || isLocked || !agencyCode.trim() || (turnstileEnabled && !cfToken)}
           >
             {isLocked
               ? `Locked — try again in ${fmtCountdown(countdown)}`

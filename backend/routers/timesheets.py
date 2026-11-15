@@ -640,15 +640,15 @@ def update_timesheet(
     try:
         row = db.execute(
             text(
-                """
+                f"""
                 SELECT v.id, v.schedule_id, CONVERT(VARCHAR, v.service_date, 23) AS service_date,
                        ISNULL(vb.approval_status, 'Pending') AS approval_status
                 FROM care.visits v
                 LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
-                WHERE v.id = :id AND v.visit_cancelled = 0
+                WHERE v.id = :id AND v.visit_cancelled = 0 AND {scope.sql_filter('v')}
                 """
             ),
-            {"id": visit_id},
+            scope.bind({"id": visit_id}),
         ).fetchone()
 
         if not row:

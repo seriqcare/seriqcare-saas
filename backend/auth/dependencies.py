@@ -33,6 +33,7 @@ from sqlalchemy import text
 
 from db.database import get_db
 from db.models import User, UserSession
+from backend.auth.tenant import verified_user_agency
 
 
 def _require_jwt_secret() -> str:
@@ -107,11 +108,20 @@ def get_current_user(
         db,
         lambda: (
             db.query(User)
-            .filter(User.username == username, User.is_active == True)
+            .filter(User.id == payload.get('user_id'), User.username == username, User.is_active == True)
             .first()
         ),
     )
     if not user:
+        raise exc
+
+    if (session.user_id != user.id or payload.get('user_id') != user.id
+            or payload.get('agency_id') != user.agency_id
+            or payload.get('employee_id') != user.employee_id
+            or payload.get('role') != user.role):
+        raise exc
+    agency = _run_with_transient_retry(db, lambda: verified_user_agency(db, user))
+    if agency and payload.get('agency_code') != agency.agency_code:
         raise exc
 
     return user

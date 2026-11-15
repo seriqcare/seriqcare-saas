@@ -111,6 +111,7 @@ test('cancellation stops a pending retry pause', async () => {
 test('concurrent submissions cannot duplicate a login POST', async () => {
   let resolveReady;
   let posts = 0;
+  let credentials;
   const ready = new Promise(resolve => { resolveReady = resolve; });
   const hooks = {
     useRef: value => ({ current: value }),
@@ -121,18 +122,19 @@ test('concurrent submissions cannot duplicate a login POST', async () => {
   const customRequire = name => {
     if (name === 'react') return hooks;
     if (name === '@/components/auth-context') return { useAuth: () => ({
-      apiBases: ['a'], signIn: async () => { posts++; return { ok: true }; },
+      apiBases: ['a'], signIn: async (...args) => { posts++; credentials = args; return { ok: true }; },
     }) };
     if (name === '@/lib/readiness') return { waitForReadiness: () => ready };
     return require(name);
   };
   const { useLoginFlow } = compile('components\\use-login-flow.ts', {}, customRequire);
   const flow = useLoginFlow();
-  const first = flow.submit('user', 'password');
-  assert.equal(await flow.submit('user', 'password'), null);
+  const first = flow.submit('ACME', 'user', 'password');
+  assert.equal(await flow.submit('ACME', 'user', 'password'), null);
   resolveReady('a');
   assert.equal((await first).ok, true);
   assert.equal(posts, 1);
+  assert.deepEqual(credentials.slice(0, 4), ['ACME', 'user', 'password', 'a']);
 });
 
 test('failed readiness does not submit login', async () => {
@@ -150,7 +152,7 @@ test('failed readiness does not submit login', async () => {
     return require(name);
   };
   const { useLoginFlow } = compile('components\\use-login-flow.ts', {}, customRequire);
-  assert.equal((await useLoginFlow().submit('user', 'password')).ok, false);
+  assert.equal((await useLoginFlow().submit('ACME', 'user', 'password')).ok, false);
   assert.equal(posts, 0);
 });
 

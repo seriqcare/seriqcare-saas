@@ -60,7 +60,7 @@ def _fmt12(dt: datetime) -> str:
     return s.lstrip("0") or s
 
 
-def _fetch_schedules(employee_id: int, from_date: date, to_date: date, db: Session):
+def _fetch_schedules(employee_id: int, agency_id: int, from_date: date, to_date: date, db: Session):
     return db.execute(
         text("""
             SELECT
@@ -77,18 +77,20 @@ def _fetch_schedules(employee_id: int, from_date: date, to_date: date, db: Sessi
                 s.status
             FROM       care.schedules        s
             JOIN       care.clients          c
-                       ON c.id  = s.client_id
+                       ON c.id  = s.client_id AND c.agency_id = s.agency_id
+            JOIN care.employees e ON e.id = s.employee_id AND e.agency_id = s.agency_id
             LEFT JOIN  care.client_addresses ca
                        ON ca.client_id = c.id
                       AND ca.is_primary = 1
             JOIN       care.service_codes    sc
                        ON sc.id = s.service_code_id
             WHERE  s.employee_id = :emp_id
+              AND  s.agency_id = :agency_id
               AND  CAST(s.scheduled_start AS DATE) BETWEEN :from_d AND :to_d
               AND  s.status <> 'Cancelled'
             ORDER BY s.scheduled_start
         """),
-        {"emp_id": employee_id, "from_d": from_date, "to_d": to_date},
+        {"emp_id": employee_id, "agency_id": agency_id, "from_d": from_date, "to_d": to_date},
     ).fetchall()
 
 
@@ -125,10 +127,10 @@ def get_today_schedules(
     db:           Session = Depends(get_db),
 ):
     """Return all non-cancelled schedules for today assigned to the authenticated caregiver."""
-    if current_user.employee_id is None:
+    if current_user.employee_id is None or current_user.agency_id is None:
         return []
     today = date.today()
-    rows  = _fetch_schedules(current_user.employee_id, today, today, db)
+    rows  = _fetch_schedules(current_user.employee_id, current_user.agency_id, today, today, db)
     return _build_schedule_items(rows, today)
 
 
@@ -142,9 +144,9 @@ def get_week_schedules(
     Return all non-cancelled schedules for a 7-day window starting on
     start_date (defaults to today) for the authenticated caregiver.
     """
-    if current_user.employee_id is None:
+    if current_user.employee_id is None or current_user.agency_id is None:
         return []
     from_date = start_date or date.today()
     to_date   = from_date + timedelta(days=6)
-    rows = _fetch_schedules(current_user.employee_id, from_date, to_date, db)
+    rows = _fetch_schedules(current_user.employee_id, current_user.agency_id, from_date, to_date, db)
     return _build_schedule_items(rows, date.today())
