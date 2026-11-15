@@ -5,6 +5,7 @@ import { getTimesheetEntries } from '@/lib/queries/timesheets';
 import { TimesheetExportBtn } from '@/components/timesheet-export-btn';
 import { TimesheetApproveBtn } from '@/components/timesheet-approve-btn';
 import { VisitPeriodSelect } from '@/components/visit-period-select';
+import { LiveVisitRefresh } from '@/components/live-visit-refresh';
 
 export const dynamic = 'force-dynamic';
 const PER_PAGE = 20;
@@ -50,13 +51,13 @@ function HoursCell({ regular, ot }: { regular: number; ot: number }) {
 }
 
 // ─── Time range ────────────────────────────────────────────────────────────────
-function TimeRange({ clockIn, clockOut }: { clockIn: string | null; clockOut: string | null }) {
+function TimeRange({ clockIn, clockOut, showProgress = false }: { clockIn: string | null; clockOut: string | null; showProgress?: boolean }) {
   if (!clockIn && !clockOut) return <span style={{ color: 'var(--muted)' }}>—</span>;
   return (
     <div style={{ fontSize: 12, lineHeight: 1.6 }}>
       <span>{clockIn ?? '—'}</span>
       <span style={{ color: 'var(--muted)', margin: '0 4px' }}>→</span>
-      <span>{clockOut ?? '—'}</span>
+      {showProgress && clockIn && !clockOut ? <span className="status in-progress">In Progress</span> : <span>{clockOut ?? '—'}</span>}
     </div>
   );
 }
@@ -104,6 +105,7 @@ export default async function TimesheetsPage({
 
   return (
     <ProtectedLayout>
+      <LiveVisitRefresh />
       <div className="topbar">
         <div>
           <h1 className="page-title">Timesheets</h1>
@@ -243,12 +245,12 @@ export default async function TimesheetsPage({
 
                     {/* Time range */}
                     <td>
-                      <TimeRange clockIn={v.clock_in} clockOut={v.clock_out} />
+                      <TimeRange clockIn={v.clock_in} clockOut={v.clock_out} showProgress />
                     </td>
 
                     {/* Hours (regular + OT) */}
                     <td>
-                      <HoursCell regular={v.regular_hours} ot={v.ot_hours} />
+                      {v.clock_in && !v.clock_out ? <span style={{ color: 'var(--muted)' }}>Awaiting clock-out</span> : <HoursCell regular={v.regular_hours} ot={v.ot_hours} />}
                     </td>
 
                     {/* Pay rate */}
@@ -258,7 +260,7 @@ export default async function TimesheetsPage({
 
                     {/* Gross pay */}
                     <td>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>${v.gross_pay.toFixed(2)}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{v.clock_in && !v.clock_out ? '—' : `$${v.gross_pay.toFixed(2)}`}</span>
                     </td>
 
                     {/* Approval / payroll status */}

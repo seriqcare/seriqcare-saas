@@ -61,7 +61,8 @@ export function TimesheetApproveBtn({ entry }: Props) {
           <button
             className="action-link"
             style={{ background: 'none', border: 'none', padding: 0, cursor: busy ? 'not-allowed' : 'pointer' }}
-            disabled={busy}
+            disabled={busy || !entry.clock_in || !entry.clock_out}
+            title={!entry.clock_in || !entry.clock_out ? 'Clock-in and clock-out are required before approval' : undefined}
             onClick={handleApprove}
           >
             {busy ? '…' : 'Approve'}
@@ -137,7 +138,7 @@ function EditTimesheetModal({ entry, onClose }: { entry: TimesheetEntry; onClose
   }
 
   return (
-    <div
+    <div role="dialog" aria-modal="true" aria-label="Edit timesheet"
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,

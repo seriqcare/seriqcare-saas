@@ -61,6 +61,13 @@ class ClockOutResponse(BaseModel):
     message:      str = ""
 
 
+class ActiveVisitResponse(BaseModel):
+    visit_id: int
+    schedule_id: int
+    client_name: str
+    clocked_in: str
+
+
 class VisitHistoryItem(BaseModel):
     visit_id:        int
     client_name:     str
@@ -103,6 +110,38 @@ def _parse_iso(ts: str) -> datetime:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@router.get("/active", response_model=Optional[ActiveVisitResponse])
+def get_active_visit(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.employee_id is None or current_user.agency_id is None:
+        raise HTTPException(status_code=403, detail="User is not linked to an employee and agency")
+    row = db.execute(text("""
+        SELECT TOP 1 v.id AS visit_id, v.schedule_id,
+            c.first_name + ' ' + c.last_name AS client_name,
+            COALESCE(ev.adj_in_datetime, ev.call_in_datetime) AS clocked_in
+        FROM care.visits v
+        JOIN care.visit_evv ev ON ev.visit_id = v.id
+        JOIN care.clients c ON c.id = v.client_id AND c.agency_id = v.agency_id
+        JOIN care.employees e ON e.id = v.employee_id AND e.agency_id = v.agency_id
+        WHERE v.employee_id = :employee_id AND v.agency_id = :agency_id
+          AND v.visit_cancelled = 0 AND v.schedule_id IS NOT NULL
+          AND COALESCE(ev.adj_in_datetime, ev.call_in_datetime) IS NOT NULL
+          AND COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NULL
+        ORDER BY COALESCE(ev.adj_in_datetime, ev.call_in_datetime) DESC, v.id DESC
+    """), {"employee_id": current_user.employee_id, "agency_id": current_user.agency_id}).fetchone()
+    if not row:
+        return None
+    clocked_in = row.clocked_in
+    if clocked_in.tzinfo is None:
+        clocked_in = clocked_in.replace(tzinfo=EASTERN)
+    return ActiveVisitResponse(
+        visit_id=row.visit_id, schedule_id=row.schedule_id,
+        client_name=row.client_name, clocked_in=clocked_in.isoformat(),
+    )
+
 
 @router.post("/clock-in", response_model=ClockInResponse)
 def clock_in(

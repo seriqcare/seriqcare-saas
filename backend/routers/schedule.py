@@ -154,7 +154,17 @@ def get_week_schedule(
                     sc.description AS service_type,
                     CONVERT(VARCHAR, s.scheduled_start, 120) AS scheduled_start,
                     CONVERT(VARCHAR, s.scheduled_end,   120) AS scheduled_end,
-                    s.status,
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM care.visits active_visit
+                        JOIN care.visit_evv active_evv ON active_evv.visit_id = active_visit.id
+                        WHERE active_visit.schedule_id = s.id
+                          AND active_visit.agency_id = s.agency_id
+                          AND active_visit.client_id = s.client_id
+                          AND active_visit.employee_id = s.employee_id
+                          AND active_visit.visit_cancelled = 0
+                          AND COALESCE(active_evv.adj_in_datetime, active_evv.call_in_datetime) IS NOT NULL
+                          AND COALESCE(active_evv.adj_out_datetime, active_evv.call_out_datetime) IS NULL
+                    ) THEN 'In Progress' ELSE s.status END AS status,
                     s.notes,
                     s.employee_id,
                     DATEPART(WEEKDAY, s.scheduled_start) AS day_of_week_sql

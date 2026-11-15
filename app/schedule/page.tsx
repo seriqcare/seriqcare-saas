@@ -6,18 +6,20 @@ import { getCaregivers } from '@/lib/queries/caregivers';
 // import { QuerySearchInput } from '@/components/query-search-input';
 import { NewShiftButton } from '@/components/new-shift-modal';
 import { paginateScheduleVisits } from '@/lib/schedule-pagination';
+import { LiveVisitRefresh } from '@/components/live-visit-refresh';
 
 export const dynamic = 'force-dynamic';
 
 /* ── Constants ─────────────────────────────────────── */
 const CHIP_STYLE: Record<string, { bg: string; border: string; text: string }> = {
   Scheduled: { bg: '#eaf4fb', border: '#c8dff0', text: '#1d5a96' },
+  'In Progress': { bg: '#f3edff', border: '#d9c8fa', text: '#6d28d9' },
   Completed: { bg: '#edf7ef', border: '#bddbbf', text: '#35693c' },
   Open:      { bg: '#fff6e7', border: '#eed6a6', text: '#8a6424' },
   Cancelled: { bg: '#f8e3e3', border: '#e6baba', text: '#944949' },
 };
 const STATUS_CLS: Record<string, string> = {
-  Scheduled: '', Completed: 'active', Open: 'pending', Cancelled: 'hold',
+  Scheduled: '', 'In Progress': 'in-progress', Completed: 'active', Open: 'pending', Cancelled: 'hold',
 };
 
 const SCHEDULE_LIST_LIMIT = 7;
@@ -217,6 +219,7 @@ export default async function SchedulePage({
 
   return (
     <ProtectedLayout>
+      <LiveVisitRefresh />
 
       {/* ── Topbar ─────────────────────────────────────── */}
       <div className="topbar">
@@ -261,7 +264,7 @@ export default async function SchedulePage({
               <div className="card-subtitle">Live · {dateLabel} · color = visit status</div>
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              {[['Completed','#35693c'],['Scheduled','#2567a4'],['Open','#c4831e']].map(([l, c]) => (
+              {[['Completed','#35693c'],['In Progress','#6d28d9'],['Scheduled','#2567a4'],['Open','#c4831e']].map(([l, c]) => (
                 <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--muted)' }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: c, display: 'inline-block' }} />
                   {l}
@@ -344,9 +347,9 @@ export default async function SchedulePage({
                         return (
                           <div key={entry.id} style={{
                             borderRadius: 5, padding: '5px 7px', fontSize: 10, lineHeight: 1.35,
-                            borderLeft: `3px solid ${chip.border}`,
-                            border: `1px solid ${chip.border}`,
-                            borderLeftWidth: 3,
+                            borderStyle: 'solid',
+                            borderColor: chip.border,
+                            borderWidth: '1px 1px 1px 3px',
                             background: chip.bg, color: chip.text,
                           }}>
                             <div style={{ fontWeight: 700, marginBottom: 3 }}>

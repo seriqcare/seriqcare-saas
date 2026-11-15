@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-context';
 import { useLoginFlow } from '@/components/use-login-flow';
 import styles from './clock.module.css';
+import { useActiveVisit } from '@/components/use-active-visit';
 
 type TabId = 'schedule' | 'clock' | 'tasks' | 'profile';
 
@@ -18,13 +19,6 @@ interface ScheduleItem {
   address: string;
   service_code: string;
   status: string;
-}
-
-interface ActiveVisit {
-  visit_id: number;
-  schedule_id: number;
-  client_name: string;
-  clocked_in: string;
 }
 
 interface HistoryItem {
@@ -119,7 +113,9 @@ export default function ClockPage() {
   const [tasksSaving, setTasksSaving] = useState(false);
 
   const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
-  const [activeVisit, setActiveVisit] = useState<ActiveVisit | null>(null);
+  const { activeVisit, activeVisitStatus, refreshActiveVisit, setConfirmedActiveVisit: persistActiveVisit } = useActiveVisit(
+    user ? `${user.agency_id}:${user.employee_id}:${user.username}` : null, apiFetch,
+  );
   const [taskSelection, setTaskSelection] = useState<number[]>([]);
 
   const [actionState, setActionState] = useState<ActionState>('idle');
@@ -134,19 +130,6 @@ export default function ClockPage() {
   );
 
   const elapsedText = useElapsed(activeVisit?.clocked_in ?? null);
-
-  const persistActiveVisit = useCallback((visit: ActiveVisit | null) => {
-    setActiveVisit(visit);
-    try {
-      if (visit) {
-        sessionStorage.setItem('seriqcare_active_visit', JSON.stringify(visit));
-      } else {
-        sessionStorage.removeItem('seriqcare_active_visit');
-      }
-    } catch {
-      // ignore session storage errors
-    }
-  }, []);
 
   const showSnack = useCallback((msg: string) => {
     setSnack(msg);
@@ -224,22 +207,23 @@ export default function ClockPage() {
   }, [apiFetch]);
 
   useEffect(() => {
+    setSelectedScheduleId(null);
+    setSchedules([]);
+    setHistory([]);
+    setTasks([]);
+    setProfile(null);
+    setStatusMessage('');
+    setActionState('idle');
+  }, [user?.agency_id, user?.employee_id, user?.username]);
+
+  useEffect(() => {
     if (!user) return;
     void loadData();
   }, [loadData, user]);
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem('seriqcare_active_visit');
-      if (raw) {
-        const visit = JSON.parse(raw) as ActiveVisit;
-        setActiveVisit(visit);
-        setSelectedScheduleId(visit.schedule_id);
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }, []);
+    if (activeVisit) setSelectedScheduleId(activeVisit.schedule_id);
+  }, [activeVisit]);
 
   useEffect(() => {
     if (activeTab === 'tasks') {
@@ -249,7 +233,7 @@ export default function ClockPage() {
     }
   }, [activeTab, loadProfile, loadTasks]);
 
-  const clockActionDisabled = actionState === 'gps' || actionState === 'saving';
+  const clockActionDisabled = activeVisitStatus !== 'ready' || actionState === 'gps' || actionState === 'saving';
 
   async function handleClockIn() {
     if (!selectedSchedule) {
@@ -529,9 +513,10 @@ export default function ClockPage() {
                 <IconStatusRing />
               </div>
               <div style={{ fontSize: 34, fontWeight: 800, color: activeVisit ? '#13a764' : '#65728b' }}>
-                {activeVisit ? 'Clocked In' : 'Clocked Out'}
+                {activeVisitStatus === 'checking' ? 'Checking visit…' : activeVisitStatus === 'error' ? 'Status unavailable' : activeVisit ? 'Clocked In' : 'Clocked Out'}
               </div>
-              <div style={{ marginTop: 6, fontSize: 15, color: activeVisit ? '#22b070' : '#73809a' }}>{elapsedText}</div>
+              <div style={{ marginTop: 6, fontSize: 15, color: activeVisit ? '#22b070' : '#73809a' }}>{activeVisitStatus === 'ready' ? elapsedText : 'Verifying your visit with the server'}</div>
+              {activeVisitStatus === 'error' && <button type="button" onClick={() => void refreshActiveVisit()} style={{ marginTop: 12, padding: '8px 16px', cursor: 'pointer' }}>Retry visit check</button>}
             </div>
 
             <div style={{ background: '#fff', borderRadius: 22, padding: 18, border: '1px solid #ccd5e2', marginBottom: 14 }}>

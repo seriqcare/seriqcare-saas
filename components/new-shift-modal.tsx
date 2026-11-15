@@ -196,6 +196,9 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
 
       {open && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={isEdit ? 'Edit shift' : 'New shift'}
           style={{
             position: 'fixed',
             inset: 0,

@@ -1,8 +1,7 @@
 """
 GET /api/timesheets
-Queries care.timesheet when available (run sql/add_timesheet_table.sql to create it).
-Falls back to a live JOIN on care.visits + employees + clients + service_codes
-so the endpoint always returns data even before the table is populated.
+Reads live visit, EVV, and billing records so active and pending visits are
+visible even when the optional care.timesheet mirror is behind.
 """
 from __future__ import annotations
 
@@ -310,14 +309,7 @@ def get_timesheets(
 ):
     try:
         ensure_default_pay_group(db)
-        use_table = _timesheet_table_exists(db)
-        if use_table and not _timesheet_table_is_fresh(week, db, scope):
-            use_table = False
-        return (
-            _query_timesheet_table(page, per_page, week, search, status, db, scope)
-            if use_table
-            else _query_visits_fallback(page, per_page, week, search, status, db, scope)
-        )
+        return _query_visits_fallback(page, per_page, week, search, status, db, scope)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Database error: {exc}") from exc
 
@@ -442,7 +434,7 @@ def _query_visits_fallback(
         "per_page":   per_page,
     })
     if status and status.lower() not in ("all", ""):
-        where_parts.append("vb.approval_status = :status")
+        where_parts.append("ISNULL(vb.approval_status, 'Pending') = :status")
         params["status"] = status
     if search.strip():
         where_parts.append(
@@ -458,18 +450,18 @@ def _query_visits_fallback(
         SELECT
             COUNT(*)                                                                AS total_records,
             ISNULL(SUM(
-                CASE WHEN ev.call_out_datetime IS NOT NULL
+                CASE WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
                 THEN DATEDIFF(MINUTE,
                     COALESCE(ev.adj_in_datetime,  ev.call_in_datetime),
                     COALESCE(ev.adj_out_datetime, ev.call_out_datetime)
                 ) / 60.0 END
             ), 0)                                                                   AS total_hours,
-            COUNT(CASE WHEN vb.approval_status = 'Pending'   THEN 1 END)           AS pending,
+            COUNT(CASE WHEN ISNULL(vb.approval_status, 'Pending') = 'Pending' THEN 1 END) AS pending,
             COUNT(CASE WHEN vb.approval_status = 'Approved'  THEN 1 END)           AS approved,
             COUNT(CASE WHEN ev.evv_status      = 'Incomplete' THEN 1 END)          AS exceptions
         FROM care.visits v
-        JOIN care.employees    e  ON v.employee_id     = e.id
-        JOIN care.clients      c  ON v.client_id       = c.id
+        JOIN care.employees    e  ON v.employee_id     = e.id AND e.agency_id = v.agency_id
+        JOIN care.clients      c  ON v.client_id       = c.id AND c.agency_id = v.agency_id
         JOIN care.service_codes sc ON v.service_code_id = sc.id
         LEFT JOIN care.visit_evv     ev ON ev.visit_id = v.id
         LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
@@ -479,8 +471,8 @@ def _query_visits_fallback(
     count_row = db.execute(text(f"""
         SELECT COUNT(*) AS total
         FROM care.visits v
-        JOIN care.employees    e  ON v.employee_id     = e.id
-        JOIN care.clients      c  ON v.client_id       = c.id
+        JOIN care.employees    e  ON v.employee_id     = e.id AND e.agency_id = v.agency_id
+        JOIN care.clients      c  ON v.client_id       = c.id AND c.agency_id = v.agency_id
         JOIN care.service_codes sc ON v.service_code_id = sc.id
         LEFT JOIN care.visit_evv     ev ON ev.visit_id = v.id
         LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
@@ -503,14 +495,14 @@ def _query_visits_fallback(
             FORMAT(COALESCE(ev.adj_in_datetime,  ev.call_in_datetime),  'hh:mm tt') AS clock_in,
             FORMAT(COALESCE(ev.adj_out_datetime, ev.call_out_datetime), 'hh:mm tt') AS clock_out,
             ISNULL(
-                CASE WHEN ev.call_out_datetime IS NOT NULL
+                CASE WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
                 THEN CAST(DATEDIFF(MINUTE,
                     COALESCE(ev.adj_in_datetime,  ev.call_in_datetime),
                     COALESCE(ev.adj_out_datetime, ev.call_out_datetime)
                 ) AS DECIMAL(6,2)) / 60 END,
             0)                                                           AS total_hours,
             ISNULL(
-                CASE WHEN ev.call_out_datetime IS NOT NULL
+                CASE WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
                 THEN
                     CASE WHEN DATEDIFF(MINUTE,
                         COALESCE(ev.adj_in_datetime, ev.call_in_datetime),
@@ -524,7 +516,7 @@ def _query_visits_fallback(
                 END,
             0)                                                           AS regular_hours,
             ISNULL(
-                CASE WHEN ev.call_out_datetime IS NOT NULL
+                CASE WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
                 THEN
                     CASE WHEN DATEDIFF(MINUTE,
                         COALESCE(ev.adj_in_datetime, ev.call_in_datetime),
@@ -549,9 +541,10 @@ def _query_visits_fallback(
             ISNULL(CAST(v.notes AS VARCHAR(MAX)), '')                   AS notes,
             COALESCE(CAST(pgr.rate AS FLOAT), 0)                        AS pay_rate,
             CASE
+                WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NULL THEN 0
                 WHEN COALESCE(pgr.pay_type, 'Hourly') = 'Per Visit' THEN COALESCE(CAST(pgr.rate AS FLOAT), 0)
                 ELSE COALESCE(CAST(pgr.rate AS FLOAT), 0) * ISNULL(
-                    CASE WHEN ev.call_out_datetime IS NOT NULL
+                    CASE WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
                     THEN CAST(DATEDIFF(MINUTE,
                         COALESCE(ev.adj_in_datetime,  ev.call_in_datetime),
                         COALESCE(ev.adj_out_datetime, ev.call_out_datetime)
@@ -559,12 +552,12 @@ def _query_visits_fallback(
                 0)
             END                                                         AS gross_pay
         FROM care.visits v
-        JOIN care.employees    e  ON v.employee_id     = e.id
-        JOIN care.clients      c  ON v.client_id       = c.id
+        JOIN care.employees    e  ON v.employee_id     = e.id AND e.agency_id = v.agency_id
+        JOIN care.clients      c  ON v.client_id       = c.id AND c.agency_id = v.agency_id
         JOIN care.service_codes sc ON v.service_code_id = sc.id
         LEFT JOIN care.visit_evv     ev ON ev.visit_id = v.id
         LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
-        LEFT JOIN care.schedules s ON s.id = v.schedule_id
+        LEFT JOIN care.schedules s ON s.id = v.schedule_id AND s.agency_id = v.agency_id
         LEFT JOIN care.employee_payroll_settings eps ON eps.employee_id = e.id
         LEFT JOIN care.pay_group_rates pgr ON pgr.id = eps.pay_group_rate_id
         WHERE {where_sql}
@@ -755,19 +748,24 @@ def approve_timesheet(
     try:
         # Verify the visit exists and is Pending
         row = db.execute(
-            text("""
-                SELECT v.id, ISNULL(vb.approval_status, 'Pending') AS approval_status
+            text(f"""
+                SELECT v.id, ISNULL(vb.approval_status, 'Pending') AS approval_status,
+                    COALESCE(ev.adj_in_datetime, ev.call_in_datetime) AS clock_in,
+                    COALESCE(ev.adj_out_datetime, ev.call_out_datetime) AS clock_out
                 FROM care.visits v
                 LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
-                WHERE v.id = :id AND v.visit_cancelled = 0
+                LEFT JOIN care.visit_evv ev ON ev.visit_id = v.id
+                WHERE v.id = :id AND v.visit_cancelled = 0 AND {scope.sql_filter('v')}
             """),
-            {"id": visit_id},
+            scope.bind({"id": visit_id}),
         ).fetchone()
 
         if not row:
             raise HTTPException(status_code=404, detail=f"Visit {visit_id} not found.")
         if row.approval_status == "Approved":
             raise HTTPException(status_code=422, detail=f"Visit {visit_id} is already Approved.")
+        if row.clock_in is None or row.clock_out is None:
+            raise HTTPException(status_code=422, detail="Clock-in and clock-out are required before approving a timesheet.")
 
         now_utc = now_eastern_naive()
 
