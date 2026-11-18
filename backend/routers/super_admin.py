@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import require_role
+from backend.auth.constants import PLATFORM_LOGIN_CODE
 from backend.services.auth_tokens import hash_token
 from backend.services.timezone import SQLSERVER_LOCAL_DATE_EXPR
 from db.database import get_db
@@ -152,6 +153,8 @@ def create_agency(
 ):
     body.aggregator = _validate_agency_plan(body.tier, body.aggregator)
     code = body.agency_code.strip().upper()
+    if code == PLATFORM_LOGIN_CODE:
+        raise HTTPException(status_code=422, detail='Agency code 999 is reserved for platform sign-in.')
     email = body.primary_contact_email.strip().lower()
     username = body.admin_username.strip()
 
@@ -241,6 +244,8 @@ def create_agency(
             reset_token=raw_token,
             contact_name=body.primary_contact_name.strip(),
             agency_name=body.name.strip(),
+            agency_id=agency_id,
+            agency_code=code,
         )
         email_sent = True
     except Exception as exc:
@@ -252,6 +257,7 @@ def create_agency(
     )
     return {
         "id": agency_id,
+        "agency_code": code,
         "admin_user": {
             "user_id": user_id,
             "username": username,

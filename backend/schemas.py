@@ -31,8 +31,20 @@ class CaregiverUtilization(BaseModel):
     utilization_pct: float
 
 
+class DashboardAuthorization(BaseModel):
+    auth_id: int
+    client_id: int
+    client_name: str
+    service_code: Optional[str] = None
+    auth_number: Optional[str] = None
+    authorized_units: float
+    used_units: float
+    days_until_expiry: Optional[int] = None
+
+
 class DashboardMetrics(BaseModel):
     activeClients: int
+    newClientsThisMonth: int = 0
     carePlansExpiringSoon: int
     scheduledVisitsThisWeek: int
     openShifts: int
@@ -43,6 +55,8 @@ class DashboardMetrics(BaseModel):
     evvProcessed: int
     evvVerified: int
     evvIncomplete: int
+    evvInProgress: int = 0
+    evvPendingVerification: int = 0
     evvOmit: int
     pendingSubmissions: int
     rejectedSubmissions: int
@@ -128,6 +142,7 @@ class ClientDetail(BaseModel):
 
 class ClientPayerItem(BaseModel):
     id: int
+    waiver_id: Optional[int] = None
     payer_id: str
     program: str
     waiver_code: Optional[str] = None
@@ -139,6 +154,8 @@ class ClientPayerItem(BaseModel):
 
 class ClientAuthItem(BaseModel):
     id: int
+    service_code_id: Optional[int] = None
+    provider_id: Optional[int] = None
     service_code: str
     service_description: str
     auth_number: Optional[str] = None

@@ -14,6 +14,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from jose import jwt
+from backend.auth.constants import PLATFORM_LOGIN_CODE
 
 
 def _require_jwt_secret() -> str:
@@ -55,6 +56,8 @@ def refresh_token_matches_agency(token: str, agency_id: int | None) -> bool:
 
 def make_access_token(user, jti: str, agency_code: str | None = None) -> str:
     """Create a 10-minute access JWT containing the standard SeriqCare claims."""
+    if user.role == 'super_admin':
+        agency_code = PLATFORM_LOGIN_CODE
     now = datetime.utcnow()
     payload = {
         "sub": user.username,

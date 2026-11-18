@@ -2,6 +2,15 @@ import { getAuthHeaders } from './server-auth';
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? 'http://127.0.0.1:8000';
 
+export async function getClientOverview(clientId: number): Promise<{ total_visits: number; active_authorizations: number } | null> {
+  try {
+    const response = await fetch(`${API}/api/clients/${clientId}/overview`, {
+      headers: await getAuthHeaders(), cache: 'no-store', signal: AbortSignal.timeout(8000),
+    });
+    return response.ok ? response.json() : null;
+  } catch { return null; }
+}
+
 export interface ClientStats {
   total_clients: number;
   new_this_month: number;

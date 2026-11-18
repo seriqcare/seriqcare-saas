@@ -8,6 +8,7 @@ import { EscCodePanel } from '@/components/esc-code-panel';
 import { VisitRowActions } from '@/components/visit-detail-modal';
 import { AggregatorOffBanner } from '@/components/aggregator-off-banner';
 import { AggregatorTabs } from '@/components/aggregator-tabs';
+import { AggregatorSubmissionHistory } from '@/components/aggregator-submission-history';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,23 +46,6 @@ const INT_CLS: Record<string, string> = {
   Rejected:  'flag',
 };
 
-/* ── Sandata submission mock data ────────────────────── */
-const SANDATA_SUBMISSIONS = [
-  { id: 'TXN-20260308-001', type: 'Visit',    count: 14, status: 'Accepted', submitted: '2026-03-08', accepted: 13, rejected: 1 },
-  { id: 'TXN-20260307-001', type: 'Visit',    count: 18, status: 'Accepted', submitted: '2026-03-07', accepted: 18, rejected: 0 },
-  { id: 'TXN-20260306-001', type: 'Client',   count: 2,  status: 'Accepted', submitted: '2026-03-06', accepted: 2,  rejected: 0 },
-  { id: 'TXN-20260305-001', type: 'Visit',    count: 22, status: 'Partial',  submitted: '2026-03-05', accepted: 19, rejected: 3 },
-  { id: 'TXN-20260304-001', type: 'Employee', count: 1,  status: 'Accepted', submitted: '2026-03-04', accepted: 1,  rejected: 0 },
-];
-
-const SUB_STATUS_CLS: Record<string, string> = {
-  Accepted: 'active',
-  Partial:  'pending',
-  Rejected: 'flag',
-  Pending:  'hold',
-};
-
-/* ── Helpers ──────────────────────────────────────────── */
 function initials(name: string) {
   return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 }
@@ -170,7 +154,7 @@ export default async function VisitsPage({
   const endRow     = Math.min(page * PER_PAGE, total);
 
   const breakdown = evvBreakdown(items);
-  const evvTotal  = Math.max(Object.values(breakdown).reduce((a, b) => a + b, 0), 1);
+  const evvTotal  = Object.values(breakdown).reduce((a, b) => a + b, 0);
   const compRate  = complianceRate(breakdown, evvTotal);
 
   const exceptions = items.filter((v) => v.evv_status === 'Pending' || v.evv_status === 'Failed');
@@ -361,51 +345,7 @@ export default async function VisitsPage({
           <EscCodePanel />
 
           {/* Sandata submission history — shown only when Sandata tab is active or All Visits */}
-          {aggregator !== 'hhax' && (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '14px 18px 12px', borderBottom: '1px solid var(--line-soft)' }}>
-                <div className="card-title">Sandata Aggregator Submission History</div>
-                <div className="card-subtitle">Recent batch submissions · accepted, rejected, and partial results</div>
-              </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Transaction ID</th>
-                      <th>Type</th>
-                      <th>Submitted</th>
-                      <th>Records</th>
-                      <th>Accepted</th>
-                      <th>Rejected</th>
-                      <th>Status</th>
-                      <th style={{ textAlign: 'right' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {SANDATA_SUBMISSIONS.map((s) => (
-                      <tr key={s.id}>
-                        <td><div style={{ fontSize: 11, fontWeight: 700, color: '#2567a4', fontFamily: 'monospace' }}>{s.id}</div></td>
-                        <td>
-                          <span style={{ fontSize: 11, fontWeight: 600, background: '#eef5fb', color: '#2567a4', padding: '2px 8px', borderRadius: 4, border: '1px solid #c8dff0' }}>{s.type}</span>
-                        </td>
-                        <td style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{s.submitted}</td>
-                        <td style={{ fontSize: 16, fontWeight: 700 }}>{s.count}</td>
-                        <td style={{ fontSize: 14, fontWeight: 700, color: '#35693c' }}>{s.accepted}</td>
-                        <td style={{ fontSize: 14, fontWeight: 700, color: s.rejected > 0 ? '#d56b6b' : 'var(--muted)' }}>{s.rejected}</td>
-                        <td><span className={`status ${SUB_STATUS_CLS[s.status] ?? ''}`}>{s.status}</span></td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                            <a href="#" className="action-link">View</a>
-                            {s.rejected > 0 && <a href="#" className="action-link" style={{ color: '#d56b6b' }}>Resubmit</a>}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {aggregator !== 'hhax' && <AggregatorSubmissionHistory />}
         </div>
 
         {/* ── Right sidebar ───────────────────────────── */}
@@ -416,12 +356,12 @@ export default async function VisitsPage({
             <div className="card-title" style={{ marginBottom: 12 }}>EVV Compliance Rate</div>
             <div style={{ textAlign: 'center', padding: '8px 0 12px' }}>
               <div style={{ fontSize: 40, fontWeight: 700, color: compRate >= 95 ? '#35693c' : compRate >= 80 ? '#c4831e' : '#d56b6b', lineHeight: 1 }}>
-                {compRate}%
+                {evvTotal === 0 ? '—' : `${compRate}%`}
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>This week · {evvTotal} visits</div>
             </div>
             <div style={{ height: 8, background: '#e9eef4', borderRadius: 99, overflow: 'hidden', marginBottom: 12 }}>
-              <div style={{ height: '100%', width: `${compRate}%`, background: compRate >= 95 ? '#35693c' : compRate >= 80 ? '#c4831e' : '#d56b6b', borderRadius: 99 }} />
+              <div style={{ height: '100%', width: `${evvTotal === 0 ? 0 : compRate}%`, background: compRate >= 95 ? '#35693c' : compRate >= 80 ? '#c4831e' : '#d56b6b', borderRadius: 99 }} />
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
               PA-DHS requires ≥95% EVV compliance
@@ -442,7 +382,7 @@ export default async function VisitsPage({
                 <div key={label} className="evv-row">
                   <div className="evv-row-label">{label}</div>
                   <div className="evv-track">
-                    <div className={`evv-fill ${cls}`} style={{ width: `${Math.round((count / evvTotal) * 100)}%` }} />
+                    <div className={`evv-fill ${cls}`} style={{ width: `${Math.round((count / (evvTotal || 1)) * 100)}%` }} />
                   </div>
                   <div className="evv-row-count">{count}</div>
                 </div>

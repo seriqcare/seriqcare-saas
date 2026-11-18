@@ -34,6 +34,7 @@ from sqlalchemy import text
 from db.database import get_db
 from db.models import User, UserSession
 from backend.auth.tenant import verified_user_agency
+from backend.auth.constants import PLATFORM_LOGIN_CODE
 
 
 def _require_jwt_secret() -> str:
@@ -122,6 +123,8 @@ def get_current_user(
         raise exc
     agency = _run_with_transient_retry(db, lambda: verified_user_agency(db, user))
     if agency and payload.get('agency_code') != agency.agency_code:
+        raise exc
+    if user.role == 'super_admin' and payload.get('agency_code') != PLATFORM_LOGIN_CODE:
         raise exc
 
     return user

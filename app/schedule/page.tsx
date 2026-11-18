@@ -222,7 +222,7 @@ export default async function SchedulePage({
       <LiveVisitRefresh />
 
       {/* ── Topbar ─────────────────────────────────────── */}
-      <div className="topbar">
+      <div className="topbar overview-topbar">
         <div>
           <h1 className="page-title">Schedule</h1>
           <p className="page-subtitle">Weekly caregiver assignments · open shift coverage · real-time status</p>
@@ -247,7 +247,6 @@ export default async function SchedulePage({
             <Link href={weekHref} className={`status-tab${mode === 'week' ? ' active' : ''}`}>Week</Link>
             <Link href={monthHref} className={`status-tab${mode === 'month' ? ' active' : ''}`}>Month</Link>
           </div>
-          <button className="btn secondary">Export</button>
           <NewShiftButton clients={clientList} caregivers={caregiverList} serviceCodes={serviceCodes} assignmentMode={params.action === 'assign-caregiver'} />
         </div>
       </div>

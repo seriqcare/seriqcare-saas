@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
-import { HeaderUser } from '@/components/topbar';
-import { getClients } from '@/lib/queries/clients';
+import { getClients, getClientOverview } from '@/lib/queries/clients';
 import { ClientTabs } from '@/components/client-tabs';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +24,7 @@ export default async function ClientDetailPage({
   const { id } = await params;
   const numericId = Number(id);
 
-  const data = await getClients(1, 100);
+  const [data, overview] = await Promise.all([getClients(1, 100), getClientOverview(numericId)]);
   const client = data.items.find((c) => c.id === numericId);
 
   if (!client) {
@@ -35,7 +34,6 @@ export default async function ClientDetailPage({
           <Link href="/clients" className="action-link" style={{ fontSize: 13 }}>
             ← Back to Clients
           </Link>
-          <HeaderUser />
         </div>
         <div className="card" style={{ marginTop: 20 }}>
           <div className="coming-soon-wrap" style={{ minHeight: 200 }}>
@@ -65,7 +63,6 @@ export default async function ClientDetailPage({
             </svg>
             Schedule Visit
           </Link>
-          <HeaderUser />
         </div>
       </div>
 
@@ -75,9 +72,9 @@ export default async function ClientDetailPage({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20, paddingBottom: 18, borderBottom: '1px solid var(--line-soft)' }}>
           {[
             { label: 'Next Visit',    value: client.next_visit ? client.next_visit.split(' ')[0] : '—' },
-            { label: 'Total Visits',  value: '47' },
+            { label: 'Total Visits',  value: overview?.total_visits ?? 'Unavailable' },
             { label: 'Care Plan',     value: client.care_plan_status, flag: client.care_plan_status === 'Overdue' },
-            { label: 'Active Auths',  value: '3' },
+            { label: 'Active Auths',  value: overview?.active_authorizations ?? 'Unavailable' },
           ].map(({ label, value, flag }) => (
             <div key={label} style={{ textAlign: 'center', padding: '12px 10px', border: '1px solid var(--line-soft)', borderRadius: 8, background: 'var(--surface-soft)' }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: flag ? '#d56b6b' : 'var(--text)', marginBottom: 4 }}>{value}</div>

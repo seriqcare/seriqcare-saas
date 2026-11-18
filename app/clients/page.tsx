@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
-import { HeaderUser } from '@/components/topbar';
 import { getClients } from '@/lib/queries/clients';
 import { QuerySearchInput } from '@/components/query-search-input';
 import { CLIENT_QUICK_ACTIONS } from '@/lib/client-quick-actions';
@@ -37,7 +36,7 @@ export default async function ClientsPage({
   return (
     <ProtectedLayout>
       {/* ── Topbar ─────────────────────────────────────── */}
-      <div className="topbar directory-topbar">
+      <div className="topbar overview-topbar">
         <div>
           <h1 className="page-title">Clients</h1>
           <p className="page-subtitle">
@@ -46,14 +45,12 @@ export default async function ClientsPage({
         </div>
         <div className="top-actions">
           <QuerySearchInput placeholder="Search name, caregiver, or MA ID..." />
-          <button className="btn secondary">Export</button>
           <Link href="/clients/new" prefetch={true} className="btn" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2.2">
               <path d="M7 1v12M1 7h12"/>
             </svg>
             Add Client
           </Link>
-          <HeaderUser />
         </div>
       </div>
 

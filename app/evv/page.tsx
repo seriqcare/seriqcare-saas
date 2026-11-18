@@ -1,7 +1,9 @@
+import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { HeaderUser } from '@/components/topbar';
 import { EvvAggregatorPanel } from '@/components/evv-aggregator-panel';
 import { AggregatorTabs } from '@/components/aggregator-tabs';
+import styles from './evv.module.css';
 import {
   getAggregatorQueue,
   getAggregatorSubmissions,
@@ -18,14 +20,33 @@ const SUBTITLES: Record<string, string> = {
 export default async function EVVPage({
   searchParams,
 }: {
-  searchParams: Promise<{ aggregator?: string }>;
+  searchParams: Promise<{ aggregator?: string; tab?: string; history_page?: string }>;
 }) {
-  const { aggregator = '' } = await searchParams;
+  const { aggregator = '', tab, history_page = '1' } = await searchParams;
+  const historyPage = Math.max(1, parseInt(history_page, 10) || 1);
 
-  const [queue, submissions] = await Promise.all([
+  const [queueResult, submissionsResult] = await Promise.allSettled([
     getAggregatorQueue(aggregator),
-    getAggregatorSubmissions(1, 50, '', aggregator),
+    getAggregatorSubmissions(historyPage, 50, '', aggregator),
   ]);
+  if (queueResult.status === 'rejected' || submissionsResult.status === 'rejected') {
+    const retry = `/evv?${new URLSearchParams({ aggregator, tab: tab === 'history' ? 'history' : 'queue', history_page: String(historyPage) })}`;
+    return <ProtectedLayout>
+      <div className="topbar overview-topbar">
+        <h1 className="page-title">EVV Aggregator</h1>
+        <div className="top-actions"><HeaderUser /></div>
+      </div>
+      <div className="card" role="alert">
+        <div className="card-title">Unable to load submission data</div>
+        <p style={{ fontSize: 12, color: 'var(--muted)' }}>Please reload the page and try again.</p>
+        <a href={retry} className="action-link">Reload history</a>
+        <span style={{ margin: '0 10px' }}>·</span>
+        <Link href="/visits" className="action-link">Back to Visits</Link>
+      </div>
+    </ProtectedLayout>;
+  }
+  const queue = queueResult.value;
+  const submissions = submissionsResult.value;
 
   // Derive stats from submission history
   const accepted = submissions.items.filter(s => s.status === 'Accepted').length;
@@ -40,43 +61,43 @@ export default async function EVVPage({
   return (
     <ProtectedLayout>
       {/* ── Top bar ── */}
-      <div className="topbar">
+      <div className="topbar overview-topbar">
         <div className="topbar-left">
           <div className="page-title">{aggLabel} Aggregator</div>
           <div className="page-subtitle">{subtitle}</div>
         </div>
-        <div className="topbar-right"><HeaderUser /></div>
+        <div className="top-actions"><HeaderUser /></div>
       </div>
 
       {/* ── Aggregator tabs ── */}
       <AggregatorTabs />
 
       {/* ── Stats row ── */}
-      <div className="kpi-row" style={{ marginBottom: 24 }}>
-        <div className="kpi-card">
-          <div className="kpi-value" style={{ color: modeColor }}>{queue.total}</div>
-          <div className="kpi-label">Queued</div>
-          <div className="kpi-sub">Ready to submit</div>
+      <div className={styles.metrics}>
+        <div className={styles.metric}>
+          <div className={styles.value} style={{ color: modeColor }}>{queue.total}</div>
+          <div className={styles.label}>Queued</div>
+          <div className={styles.sub}>Ready to submit</div>
         </div>
-        <div className="kpi-card">
-          <div className="kpi-value">{submissions.total}</div>
-          <div className="kpi-label">Total Submissions</div>
-          <div className="kpi-sub">{aggregator ? `${aggLabel} all time` : 'All aggregators'}</div>
+        <div className={styles.metric}>
+          <div className={styles.value}>{submissions.total}</div>
+          <div className={styles.label}>Total Submissions</div>
+          <div className={styles.sub}>{aggregator ? `${aggLabel} all time` : 'All aggregators'}</div>
         </div>
-        <div className="kpi-card">
-          <div className="kpi-value" style={{ color: '#35693c' }}>{accepted}</div>
-          <div className="kpi-label">Accepted</div>
-          <div className="kpi-sub">Successfully processed</div>
+        <div className={styles.metric}>
+          <div className={styles.value} style={{ color: '#35693c' }}>{accepted}</div>
+          <div className={styles.label}>Accepted</div>
+          <div className={styles.sub}>On this history page</div>
         </div>
-        <div className="kpi-card">
-          <div className="kpi-value" style={{ color: rejected > 0 ? '#d56b6b' : 'inherit' }}>{rejected}</div>
-          <div className="kpi-label">Rejected / Error</div>
-          <div className="kpi-sub">Require attention</div>
+        <div className={styles.metric}>
+          <div className={styles.value} style={{ color: rejected > 0 ? '#d56b6b' : 'inherit' }}>{rejected}</div>
+          <div className={styles.label}>Rejected / Error</div>
+          <div className={styles.sub}>On this history page</div>
         </div>
-        <div className="kpi-card">
-          <div className="kpi-value" style={{ color: pending > 0 ? '#c4831e' : 'inherit' }}>{pending}</div>
-          <div className="kpi-label">Pending</div>
-          <div className="kpi-sub">Awaiting response</div>
+        <div className={styles.metric}>
+          <div className={styles.value} style={{ color: pending > 0 ? '#c4831e' : 'inherit' }}>{pending}</div>
+          <div className={styles.label}>Pending</div>
+          <div className={styles.sub}>On this history page</div>
         </div>
       </div>
 
@@ -104,13 +125,15 @@ export default async function EVVPage({
       )}
 
       {/* ── Interactive queue + history panel ── */}
-      <div className="detail-section">
+      <div className={`card ${styles.panel}`}>
         <EvvAggregatorPanel
           initialQueue={queue.items}
           initialHistory={submissions.items}
           historyTotal={submissions.total}
           mode={queue.mode}
           aggregator={aggregator}
+          initialTab={tab === 'history' || historyPage > 1 ? 'history' : 'queue'}
+          historyPage={historyPage}
         />
       </div>
     </ProtectedLayout>

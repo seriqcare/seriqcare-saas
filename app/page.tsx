@@ -1,20 +1,26 @@
+import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
-import { HeaderUser } from '@/components/topbar';
 import { DashboardEvvPanels } from '@/components/dashboard-evv-panels';
-import { getCaregiverUtilization, getDashboardMetrics } from '@/lib/queries/dashboard';
+import { getCaregiverUtilization, getDashboardAuthorizations, getDashboardMetrics } from '@/lib/queries/dashboard';
+import styles from './dashboard.module.css';
+import { LiveVisitRefresh } from '@/components/live-visit-refresh';
 
 export const dynamic = 'force-dynamic';
 
 /* ── Helpers ──────────────────────────────────────── */
-function fmt(n: number) { return n.toLocaleString('en-US'); }
-function fmtHours(n: number) { return n.toFixed(0); }
+function fmt(n: number | null | undefined) { return (n ?? 0).toLocaleString('en-US'); }
+function fmtHours(n: number | null | undefined) { return (n ?? 0).toFixed(0); }
 
 export default async function DashboardPage() {
-  const [m, utilizationResult] = await Promise.all([
+  const [m, utilizationResult, authorizationResult] = await Promise.all([
     getDashboardMetrics(),
     getCaregiverUtilization().then(
       data => ({ data, error: null }),
       error => ({ data: null, error: error instanceof Error ? error.message : 'Unable to load caregiver utilization' }),
+    ),
+    getDashboardAuthorizations().then(
+      data => ({ data, error: null }),
+      error => ({ data: null, error: error instanceof Error ? error.message : 'Unable to load authorizations' }),
     ),
   ]);
 
@@ -23,8 +29,9 @@ export default async function DashboardPage() {
 
   return (
     <ProtectedLayout>
+      <LiveVisitRefresh />
       {/* ── Topbar ─────────────────────────────────── */}
-      <div className="topbar">
+      <div className="topbar overview-topbar">
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p className="page-subtitle">
@@ -33,8 +40,6 @@ export default async function DashboardPage() {
         </div>
         <div className="top-actions">
           <div className="filter">This Week</div>
-          <button className="btn secondary">Export</button>
-          <HeaderUser />
         </div>
       </div>
 
@@ -42,34 +47,34 @@ export default async function DashboardPage() {
       <section className="summary-row" style={{ marginBottom: 14 }}>
         <div className="summary-card">
           <div className="summary-label">Active Clients</div>
-          <div className="summary-sub-label">Auths Expiring</div>
+          <div className="summary-sub-label">New this month</div>
           <div className="summary-value">{fmt(m.activeClients)}</div>
-          <div className="summary-sub-value">{m.carePlansExpiringSoon}</div>
+          <div className="summary-sub-value">{m.newClientsThisMonth ?? 0}</div>
         </div>
         <div className="summary-card">
           <div className="summary-label">Visits This Week</div>
           <div className="summary-sub-label">Open Shifts</div>
           <div className="summary-value">{fmt(m.scheduledVisitsThisWeek)}</div>
-          <div className="summary-sub-value">{m.openShifts}</div>
+          <div className="summary-sub-value">{m.openShifts ?? 0}</div>
         </div>
         <div className="summary-card">
           <div className="summary-label">Caregiver Hours</div>
           <div className="summary-sub-label">Pending Approval</div>
           <div className="summary-value">{fmtHours(m.totalHoursThisWeek)}</div>
-          <div className="summary-sub-value">{m.pendingApproval}</div>
+          <div className="summary-sub-value">{m.pendingApproval ?? 0}</div>
         </div>
         <div className="summary-card">
           <div className="summary-label">EVV Exceptions</div>
           <div className="summary-sub-label">Urgent</div>
           <div className="summary-value">{m.evvExceptions}</div>
           <div className="summary-sub-value" style={{ color: m.urgentExceptions > 0 ? '#d56b6b' : undefined }}>
-            {m.urgentExceptions}
+            {m.urgentExceptions ?? 0}
           </div>
         </div>
       </section>
 
       {/* ── Row 2 — Activity chart + Priority queue ── */}
-      <div className="dash-row wide-left">
+      <div className={styles.panels}>
         <div className="card">
           <div className="card-header">
             <div>
@@ -137,26 +142,47 @@ export default async function DashboardPage() {
             )}
           </div>
         </div>
-      </div>
-
       {/* ── Row 3 — Revenue pipeline (placeholder) + Caregiver utilization ── */}
-      <div className="dash-row">
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="card-title">Revenue Pipeline</div>
-              <div className="card-subtitle">Billing, claims, and payer reimbursements</div>
+              <div className="card-title">Authorization Tracker</div>
+              <div className="card-subtitle">Units used vs. authorized per client and service</div>
             </div>
           </div>
-          <div className="coming-soon-wrap">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#b0bec5" strokeWidth="1.5">
-              <rect x="2" y="5" width="20" height="14" rx="2" />
-              <path d="M2 10h20" />
-              <path d="M6 15h4M14 15h2" />
-            </svg>
-            <div className="coming-soon-label">Coming in Phase 6</div>
-            <div className="coming-soon-sub">Billing · Claims · MA reimbursements · AR aging</div>
-          </div>
+          {authorizationResult.error ? (
+            <div role="alert">{authorizationResult.error}</div>
+          ) : authorizationResult.data?.length === 0 ? (
+            <div className="coming-soon-wrap">No active authorizations for this agency.</div>
+          ) : (
+            <div className={styles.authorizations}>
+              {authorizationResult.data?.map(auth => {
+                const percent = auth.authorized_units > 0 ? auth.used_units / auth.authorized_units * 100 : 0;
+                const days = auth.days_until_expiry;
+                const expired = days !== null && days < 0;
+                const expiry = days === null ? 'No expiry date' : expired
+                  ? `Expired ${Math.abs(days)} days ago` : days === 0 ? 'Expires today'
+                  : `Expiring in ${days} ${days === 1 ? 'day' : 'days'}`;
+                return (
+                  <div key={auth.auth_id} className={styles.authorization}>
+                    <div className={styles.authorizationHeading}>
+                      <Link href={`/clients/${auth.client_id}`}>{auth.client_name}</Link>
+                      <span className={`status-pill${expired ? ' flag' : days !== null && days <= 30 ? ' pending' : ''}`}>{expiry}</span>
+                    </div>
+                    <div className={styles.authorizationDetails}>
+                      <span>{[auth.service_code, auth.auth_number].filter(Boolean).join(' · ') || 'Service authorization'}</span>
+                      <span>{fmt(auth.used_units)} / {fmt(auth.authorized_units)} units{auth.authorized_units > 0 ? ` · ${Math.round(percent)}%` : ''}</span>
+                    </div>
+                    <progress className={styles.authorizationProgress} max={auth.authorized_units > 0 ? auth.authorized_units : 1}
+                      value={Math.max(0, Math.min(auth.used_units, auth.authorized_units))}
+                      aria-label={`${auth.client_name}, ${auth.service_code || 'authorization'}: ${auth.used_units} of ${auth.authorized_units} units used`}
+                      data-warning={percent >= 90 || expired} />
+                    {auth.authorized_units <= 0 && <div className={styles.authorizationDetails}>No units authorized</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="card">

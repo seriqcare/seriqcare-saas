@@ -44,6 +44,11 @@ def run_migrations(engine) -> None:
             "Run seriqcare_evv_ddl.sql first, then restart. "
             f"Detail: {exc}"
         )
+    # Client goals must also be available when an older, unrelated migration fails.
+    try:
+        _phase7(engine)
+    except Exception as exc:
+        log.warning("Client goals migration failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +517,28 @@ def _phase6(engine) -> None:
 # ---------------------------------------------------------------------------
 # Seed default passwords for SQL-auth users that have NULL password_hash
 # ---------------------------------------------------------------------------
+
+def _phase7(engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text('''
+            IF OBJECT_ID('care.client_goals', 'U') IS NULL
+            BEGIN
+                CREATE TABLE care.client_goals (
+                    id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                    client_id INT NOT NULL REFERENCES care.clients(id),
+                    title NVARCHAR(200) NOT NULL,
+                    description NVARCHAR(4000) NOT NULL DEFAULT '',
+                    target_date DATE NULL,
+                    progress INT NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+                    status VARCHAR(20) NOT NULL DEFAULT 'Not Started'
+                        CHECK (status IN ('Not Started','In Progress','Completed','On Hold')),
+                    notes NVARCHAR(4000) NOT NULL DEFAULT '',
+                    updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+                CREATE INDEX IX_client_goals_client ON care.client_goals(client_id);
+            END
+        '''))
+
 
 def _seed_default_passwords(engine) -> None:
     if not _DEFAULT_PASSWORD:

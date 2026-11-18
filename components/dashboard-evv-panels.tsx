@@ -10,7 +10,7 @@ function buildAlerts(m: DashboardMetrics) {
   if (m.rejectedSubmissions > 0)
     alerts.push({ dot: 'urgent', title: `${m.rejectedSubmissions} Rejected Aggregator Submission${m.rejectedSubmissions > 1 ? 's' : ''}`, sub: 'Sandata returned ESC errors — resubmission needed' });
   if (m.evvIncomplete > 0)
-    alerts.push({ dot: 'warning', title: `${m.evvIncomplete} Incomplete EVV Record${m.evvIncomplete > 1 ? 's' : ''}`, sub: 'Missing GPS, clock-in, or clock-out data for billing' });
+    alerts.push({ dot: 'warning', title: `${m.evvIncomplete} EVV Exception${m.evvIncomplete > 1 ? 's' : ''} This Week`, sub: 'Failed validation or overdue missing clock-out' });
   if (m.carePlansExpiringSoon > 0)
     alerts.push({ dot: 'warning', title: `${m.carePlansExpiringSoon} Care Plan${m.carePlansExpiringSoon > 1 ? 's' : ''} Expiring Soon`, sub: 'Authorization renewal required before service continues' });
   if (m.pendingSubmissions > 0)
@@ -26,7 +26,7 @@ export function DashboardEvvPanels({ metrics: m }: { metrics: DashboardMetrics }
   const { user, isLoading } = useAuth();
   if (isLoading || !user || user.agency_tier === 'core') return null;
 
-  const total = m.evvProcessed + m.evvVerified + m.evvIncomplete + m.evvOmit;
+  const total = m.evvProcessed + m.evvVerified + m.evvIncomplete + m.evvOmit + m.evvInProgress + m.evvPendingVerification;
   const alerts = buildAlerts(m);
 
   return (
@@ -43,7 +43,9 @@ export function DashboardEvvPanels({ metrics: m }: { metrics: DashboardMetrics }
               {[
                 { label: 'Processed', count: m.evvProcessed, cls: 'processed' },
                 { label: 'Verified', count: m.evvVerified, cls: 'verified' },
-                { label: 'Incomplete', count: m.evvIncomplete, cls: 'incomplete' },
+                { label: 'In Progress', count: m.evvInProgress, cls: 'in-progress' },
+                { label: 'Pending Verification', count: m.evvPendingVerification, cls: 'pending-verification' },
+                { label: 'Exceptions', count: m.evvIncomplete, cls: 'incomplete' },
                 { label: 'Omit', count: m.evvOmit, cls: 'omit' },
               ].map(({ label, count, cls }) => (
                 <div key={label} className="evv-row">

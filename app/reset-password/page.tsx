@@ -1,10 +1,12 @@
 'use client';
 
-import { FormEvent, Suspense, useState } from 'react';
+import { FormEvent, Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
+
+type PasswordAccount = { agency_id: number | null; agency_code: string; agency_name: string; email: string };
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams();
@@ -15,12 +17,33 @@ function ResetPasswordForm() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [account, setAccount] = useState<PasswordAccount | null>(null);
+  const [checking, setChecking] = useState(Boolean(token));
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    setChecking(true);
+    setAccount(null);
+    setError('');
+    fetch(`${API_BASE}/api/auth/password-reset-context`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }), signal: controller.signal, cache: 'no-store',
+    }).then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Unable to verify this link.');
+      if (!controller.signal.aborted) setAccount(data);
+    }).catch(err => {
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : 'Unable to verify this link.');
+    }).finally(() => { if (!controller.signal.aborted) setChecking(false); });
+    return () => controller.abort();
+  }, [token]);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
 
-    if (!token) {
+    if (!token || !account || checking) {
       setError('Invalid or missing reset token. Please request a new link.');
       return;
     }
@@ -38,7 +61,7 @@ function ResetPasswordForm() {
       const res = await fetch(`${API_BASE}/api/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, new_password: password }),
+        body: JSON.stringify({ token, new_password: password, agency_id: account.agency_id, agency_code: account.agency_code, email: account.email }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -79,12 +102,32 @@ function ResetPasswordForm() {
     );
   }
 
+  if (checking) return <p className="login-subtitle" role="status">Verifying your password setup link…</p>;
+  if (!account) return <>
+    <h1 className="login-title">Unable to verify link</h1>
+    <p className="error-text" role="alert">{error || 'This link is invalid or has expired.'}</p>
+    <Link href="/forgot-password" style={{ color: 'var(--primary)' }}>Request a new password link</Link>
+  </>;
+
   return (
     <>
       <h1 className="login-title">Set a new password</h1>
       <p className="login-subtitle">Choose a strong password — at least 8 characters.</p>
 
       <form onSubmit={onSubmit} style={{ marginTop: 20 }}>
+        <p className="login-subtitle">{account.agency_name}</p>
+        <div className="form-group">
+          <label className="label" htmlFor="agency-id">Agency ID</label>
+          <input id="agency-id" className="input" value={account.agency_id ?? 'Platform'} readOnly />
+        </div>
+        <div className="form-group">
+          <label className="label" htmlFor="agency-code">Agency Code</label>
+          <input id="agency-code" className="input" value={account.agency_code} readOnly />
+        </div>
+        <div className="form-group">
+          <label className="label" htmlFor="account-email">Email</label>
+          <input id="account-email" type="email" className="input" value={account.email} readOnly autoComplete="username" />
+        </div>
         <div className="form-group">
           <label className="label" htmlFor="password">New password</label>
           <input
@@ -95,6 +138,7 @@ function ResetPasswordForm() {
             onChange={(e) => setPassword(e.target.value)}
             disabled={submitting}
             autoComplete="new-password"
+            required minLength={8}
           />
         </div>
         <div className="form-group">
@@ -107,6 +151,7 @@ function ResetPasswordForm() {
             onChange={(e) => setConfirm(e.target.value)}
             disabled={submitting}
             autoComplete="new-password"
+            required minLength={8}
           />
         </div>
 

@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { getCaregivers, type CaregiverSummary } from '@/lib/queries/caregivers';
 import { QuerySearchInput } from '@/components/query-search-input';
-import { QueryTabs } from '@/components/query-tabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,17 +49,17 @@ function utilColor(pct: number) {
 export default async function CaregiversPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; search?: string }>;
+  searchParams: Promise<{ search?: string }>;
 }) {
-  const { status = '', search = '' } = await searchParams;
-  const data = await getCaregivers(1, 20, status, search);
+  const { search = '' } = await searchParams;
+  const data = await getCaregivers(1, 20, '', search);
   const { stats, items, total } = data;
 
   return (
     <ProtectedLayout>
 
       {/* ── Topbar ─────────────────────────────────────── */}
-      <div className="topbar directory-topbar">
+      <div className="topbar overview-topbar">
         <div>
           <h1 className="page-title">Caregivers</h1>
           <p className="page-subtitle">
@@ -69,7 +68,6 @@ export default async function CaregiversPage({
         </div>
         <div className="top-actions">
           <QuerySearchInput placeholder="Search by name, ID, or role..." />
-          <button className="btn secondary">Export</button>
           <Link
             href="/caregivers/new"
             prefetch={true}
@@ -96,15 +94,6 @@ export default async function CaregiversPage({
                 <div className="card-subtitle">Weekly visit assignments, logged hours, and EVV compliance per staff member</div>
               </div>
             </div>
-            <QueryTabs
-              param="status"
-              tabs={[
-                { label: 'All', value: '' },
-                { label: 'Active', value: 'Active' },
-                { label: 'On Leave', value: 'On Leave' },
-                { label: 'Inactive', value: 'Inactive' },
-              ]}
-            />
           </div>
 
           <div className="table-scroll caregiver-directory-content" role="region" aria-label="Caregiver directory" tabIndex={0}>

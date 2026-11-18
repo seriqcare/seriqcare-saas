@@ -3,15 +3,17 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { ClientAuthItem, ClientCareTask, ClientCareTaskInput, ClientDetail, ClientPayerItem, ClientSummary, ClientVisitItem } from '@/lib/queries/clients';
+import type { ClientCareTask, ClientCareTaskInput, ClientDetail, ClientSummary, ClientVisitItem } from '@/lib/queries/clients';
 import { useAuth } from '@/components/auth-context';
-import { getClientAuthorizations, getClientDetail, getClientInsurance, getClientVisits, setClientCareTaskCompletion, updateClient } from '@/lib/queries/clients';
+import { ClientRecordEditor } from '@/components/client-record-editor';
+import recordStyles from '@/components/client-record-editor.module.css';
+import { getClientDetail, getClientVisits, updateClient } from '@/lib/queries/clients';
 
 /* ── Helpers ─────────────────────────────────────────── */
 
 /* ── Reusable editable section wrapper ───────────────── */
 function EditSection({
-  title, children, onEdit, onSave, onCancel, editing,
+  title, children, onEdit, onSave, onCancel, editing, saving = false,
 }: {
   title: string;
   children: React.ReactNode;
@@ -19,6 +21,7 @@ function EditSection({
   onSave: () => void;
   onCancel?: () => void;
   editing: boolean;
+  saving?: boolean;
 }) {
   return (
     <div className="detail-section">
@@ -29,12 +32,14 @@ function EditSection({
             <>
               <button
                 onClick={onSave}
+                disabled={saving}
                 style={{ fontSize: 11, fontWeight: 700, background: '#2567a4', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 14px', cursor: 'pointer' }}
               >
-                Save
+                {saving ? 'Saving…' : 'Save'}
               </button>
               <button
                 onClick={onCancel ?? onSave}
+                disabled={saving}
                 style={{ fontSize: 11, fontWeight: 600, background: 'none', color: 'var(--muted)', border: '1px solid var(--line)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer' }}
               >
                 Cancel
@@ -43,6 +48,7 @@ function EditSection({
           ) : (
             <button
               onClick={onEdit}
+              disabled={saving}
               style={{ fontSize: 11, fontWeight: 600, background: 'none', color: 'var(--primary)', border: '1px solid #c8dff0', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
             >
               <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
@@ -57,6 +63,32 @@ function EditSection({
       {children}
     </div>
   );
+}
+
+function CareTaskFields({ draft, onChange, disabled }: {
+  draft: ClientCareTaskInput;
+  onChange: (field: keyof ClientCareTaskInput, value: string) => void;
+  disabled: boolean;
+}) {
+  return <fieldset disabled={disabled} className={`detail-grid ${recordStyles.fields}`}>
+    {[
+      ['title', 'Task Title'], ['specific_time', 'Specific Time'], ['recurrence_text', 'Recurrence'],
+    ].map(([field, label]) => <label className="info-field" key={field}>
+      <span className="info-label">{label}</span>
+      <input className="form-input" value={String(draft[field as keyof ClientCareTaskInput] ?? '')}
+        onChange={event => onChange(field as keyof ClientCareTaskInput, event.target.value)} />
+    </label>)}
+    <label className={`info-field ${recordStyles.wide}`}>
+      <span className="info-label">Description</span>
+      <textarea className="form-textarea" value={draft.description ?? ''} onChange={event => onChange('description', event.target.value)} />
+    </label>
+  </fieldset>;
+}
+
+function TaskActionIcon({ action }: { action: 'edit' | 'delete' }) {
+  return <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {action === 'edit' ? <path d="M10.5 2.5l3 3M2 14l3.5-.5 8-8a2.1 2.1 0 0 0-3-3l-8 8L2 14z" /> : <path d="M4 4l8 8M12 4l-8 8" />}
+  </svg>;
 }
 
 function toTaskDraft(task: ClientCareTask, index: number): ClientCareTaskInput {
@@ -390,173 +422,6 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
 }
 
 /* ── Tab: Insurance ───────────────────────────────────── */
-function InsuranceTab({ clientId, medicaidId }: { clientId: number; medicaidId: string | null }) {
-  const { user } = useAuth();
-  const [payers, setPayers] = useState<ClientPayerItem[]>([]);
-  const [auths, setAuths] = useState<ClientAuthItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!user?.token) return;
-    setLoading(true);
-    Promise.all([
-      getClientInsurance(clientId, user.token),
-      getClientAuthorizations(clientId, user.token),
-    ]).then(([p, a]) => {
-      setPayers(p);
-      setAuths(a);
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, [clientId, user?.token]);
-
-  if (loading) {
-    return <div style={{ padding: '20px 0', fontSize: 12, color: 'var(--muted)' }}>Loading insurance data…</div>;
-  }
-
-  const primary = payers[0] ?? null;
-
-  return (
-    <div>
-      <div className="detail-section">
-        <div className="detail-section-title">Payer &amp; Program</div>
-        <div className="detail-grid">
-          {[
-            ['Payer ID',         primary?.payer_id   ?? '—'],
-            ['Program',          primary?.program    ?? '—'],
-            ['Waiver',           primary?.waiver_name ?? (primary?.waiver_code ?? '—')],
-            ['Medicaid ID (MA)', medicaidId           ?? '—'],
-            ['Effective Date',   primary?.effective_date ?? '—'],
-            ['End Date',         primary?.end_date    ?? '—'],
-            ['Eligibility',      primary ? (primary.is_active ? 'Active' : 'Inactive') : '—'],
-          ].map(([label, value]) => (
-            <div key={label} className="info-field">
-              <div className="info-label">{label}</div>
-              <div className={`info-value${!value || value === '—' ? ' empty' : ''}`}>{value || '—'}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {payers.length === 0 && (
-        <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 6, border: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-          No payer records on file for this client.
-        </div>
-      )}
-
-      <div className="detail-section">
-        <div className="detail-section-title">Authorized Services Summary</div>
-        {auths.length === 0 ? (
-          <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 6, border: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--muted)' }}>
-            No service authorizations on file.
-          </div>
-        ) : (
-          <div className="mini-table-wrap">
-            <table className="mini-table">
-              <thead>
-                <tr><th>HCPCS</th><th>Service</th><th>Auth Units</th><th>Used</th><th>Remaining</th><th>Period</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {auths.map((a) => {
-                  const p = Math.min(100, Math.round(a.utilization_pct));
-                  return (
-                    <tr key={a.id}>
-                      <td><span className="status">{a.service_code}</span></td>
-                      <td style={{ fontWeight: 600 }}>{a.service_description}</td>
-                      <td>{a.authorized_units.toLocaleString()}</td>
-                      <td>
-                        {a.used_units.toLocaleString()}
-                        <div style={{ marginTop: 4, height: 4, background: '#e9eef4', borderRadius: 99, overflow: 'hidden', width: 80 }}>
-                          <div style={{ height: '100%', width: `${p}%`, background: p > 85 ? '#d56b6b' : '#2567a4', borderRadius: 99 }} />
-                        </div>
-                      </td>
-                      <td>{a.remaining_units.toLocaleString()}</td>
-                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>{a.service_start_date ?? ''}{a.service_end_date ? ` – ${a.service_end_date}` : ''}</td>
-                      <td><span className={`status ${a.is_active ? 'active' : ''}`}>{a.is_active ? 'Active' : 'Expired'}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ── Tab: Authorizations ──────────────────────────────── */
-function AuthorizationsTab({ clientId }: { clientId: number }) {
-  const { user } = useAuth();
-  const [auths, setAuths] = useState<ClientAuthItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!user?.token) return;
-    getClientAuthorizations(clientId, user.token)
-      .then(setAuths)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [clientId, user?.token]);
-
-  if (loading) {
-    return <div style={{ padding: '20px 0', fontSize: 12, color: 'var(--muted)' }}>Loading authorizations…</div>;
-  }
-
-  return (
-    <div>
-      <div className="detail-section">
-        <div className="detail-section-title">Service Authorizations</div>
-        {auths.length === 0 ? (
-          <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 6, border: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--muted)' }}>
-            No service authorizations on file for this client.
-          </div>
-        ) : (
-          <div className="mini-table-wrap">
-            <table className="mini-table">
-              <thead>
-                <tr><th>Code</th><th>Service Description</th><th>Auth Units</th><th>Used</th><th>Remaining</th><th>% Used</th><th>Period</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {auths.map((a) => {
-                  const p = Math.min(100, Math.round(a.utilization_pct));
-                  const cls = p > 90 ? 'flag' : p > 75 ? 'pending' : 'active';
-                  return (
-                    <tr key={a.id}>
-                      <td><code style={{ background: '#eef5fb', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontWeight: 700, color: '#2567a4' }}>{a.service_code}</code></td>
-                      <td style={{ fontWeight: 600 }}>{a.service_description}</td>
-                      <td>{a.authorized_units.toLocaleString()}</td>
-                      <td>{a.used_units.toLocaleString()}</td>
-                      <td style={{ fontWeight: 600 }}>{a.remaining_units.toLocaleString()}</td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div style={{ width: 60, height: 6, background: '#e9eef4', borderRadius: 99, overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${p}%`, background: p > 90 ? '#d56b6b' : p > 75 ? '#c4831e' : '#2567a4', borderRadius: 99 }} />
-                          </div>
-                          <span className={`status ${cls}`} style={{ fontSize: 10 }}>{p}%</span>
-                        </div>
-                      </td>
-                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>{a.service_start_date ?? ''}{a.service_end_date ? ` – ${a.service_end_date}` : ''}</td>
-                      <td><span className={`status ${a.is_active ? 'active' : ''}`}>{a.is_active ? 'Active' : 'Expired'}</span></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {auths.length > 0 && (
-        <div className="detail-section">
-          <div className="detail-section-title">Authorization Notes</div>
-          <div style={{ padding: '12px 14px', background: 'var(--primary-soft)', borderRadius: 6, border: '1px solid #c8dff0', fontSize: 12, color: 'var(--text)', lineHeight: 1.6 }}>
-            All authorizations issued by PA ODP under the Consolidated Waiver. Units are 15-minute increments. EVV clock-in/out is required for all billable visits.
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function CarePlanTabInner({ clientId }: { clientId: number }) {
   const { user, apiFetch } = useAuth();
   const [detail, setDetail] = useState<ClientDetail | null>(null);
@@ -569,9 +434,10 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
   const [tasksLoading, setTasksLoading] = useState(true);
   const [tasksError, setTasksError] = useState('');
   const [tasksSaving, setTasksSaving] = useState(false);
-  const [taskActionId, setTaskActionId] = useState<number | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<number | 'new' | null>(null);
   const [taskDraft, setTaskDraft] = useState<ClientCareTaskInput | null>(null);
+  const [carePlanSaving, setCarePlanSaving] = useState(false);
+  const [carePlanError, setCarePlanError] = useState('');
 
   useEffect(() => {
     if (!user?.token) return;
@@ -592,25 +458,28 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
   }, [clientId, user?.token]);
 
   function set(k: string, v: string) { setVals((p) => ({ ...p, [k]: v })); }
-  function startEdit(s: string) { setEditing((p) => ({ ...p, [s]: true })); }
+  function startEdit(s: string) { setCarePlanError(''); setEditing((p) => ({ ...p, [s]: true })); }
   async function save(s: string) {
+    if (carePlanSaving) return;
+    const payload: Record<string, string> = {};
     if (s === 'overview') {
-      const payload: Record<string, string> = {};
       if (vals.coordinator)   payload.care_coordinator       = vals.coordinator;
       if (vals.physician)     payload.physician              = vals.physician;
       if (vals.level_of_care) payload.level_of_care          = vals.level_of_care;
       if (vals.reviewed)      payload.care_plan_review_date  = vals.reviewed;
-      if (vals.notes)         payload.care_plan_notes        = vals.notes;
-      if (Object.keys(payload).length > 0) {
-        try {
-          await updateClient(clientId, payload, apiFetch);
-        } catch (error) {
-          window.alert(error instanceof Error ? error.message : 'Failed to update care plan.');
-          return;
-        }
-      }
     }
-    setEditing((p) => ({ ...p, [s]: false }));
+    if (s === 'notes') payload.care_plan_notes = vals.notes;
+    setCarePlanSaving(true);
+    setCarePlanError('');
+    try {
+      if (Object.keys(payload).length > 0) await updateClient(clientId, payload, apiFetch);
+      setDetail(current => current ? { ...current, ...payload } : current);
+      setEditing((p) => ({ ...p, [s]: false }));
+    } catch (error) {
+      setCarePlanError(error instanceof Error ? error.message : 'Failed to save care plan.');
+    } finally {
+      setCarePlanSaving(false);
+    }
   }
 
   useEffect(() => {
@@ -712,6 +581,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
   }
 
   async function removeTask(taskId: number) {
+    if (tasksSaving) return;
     setTasksSaving(true);
     setTasksError('');
     try {
@@ -740,45 +610,9 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
     }
   }
 
-  async function toggleTaskCompletion(task: ClientCareTask) {
-    if (!user?.token) {
-      setTasksError('Your session expired. Sign in again to update task completion.');
-      return;
-    }
-
-    setTaskActionId(task.id);
-    setTasksError('');
-    try {
-      const response = await setClientCareTaskCompletion(
-        clientId,
-        task.id,
-        { completed: !task.completed_today },
-        user.token,
-      );
-      setCareTasks((current) =>
-        current.map((item) =>
-          item.id === task.id
-            ? {
-                ...item,
-                completed_today: response.completed,
-                completed_on: response.completed ? response.completed_on : null,
-                completed_at: response.completed_at,
-                completed_by: response.completed_by,
-                completion_notes: response.completion_notes,
-              }
-            : item,
-        ),
-      );
-    } catch (error: unknown) {
-      setTasksError(error instanceof Error ? error.message : 'Failed to update task completion.');
-    } finally {
-      setTaskActionId(null);
-    }
-  }
-
   return (
     <div>
-      <EditSection title="Care Plan Overview" editing={!!editing.overview} onEdit={() => startEdit('overview')} onSave={() => save('overview')}>
+      <EditSection title="Care Plan Overview" editing={!!editing.overview} saving={carePlanSaving} onEdit={() => startEdit('overview')} onSave={() => save('overview')} onCancel={() => setEditing(p => ({ ...p, overview: false }))}>
         <div className="detail-grid">
           <EField label="Care Coordinator"   fieldKey="coordinator"   vals={vals} onChange={set} editing={!!editing.overview} />
           <EField label="Attending Physician" fieldKey="physician"    vals={vals} onChange={set} editing={!!editing.overview} />
@@ -811,15 +645,10 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
             {editingTaskId === 'new' && taskDraft ? (
               <div style={{ padding: '14px 16px', border: '1px solid #c8dff0', borderRadius: 8, background: '#f8fbff' }}>
                 <div style={{ display: 'grid', gap: 10 }}>
-                  <input className="form-input" value={taskDraft.title ?? ''} placeholder="Task title" onChange={(event) => updateTaskDraft('title', event.target.value)} />
-                  <textarea className="form-textarea" value={taskDraft.description ?? ''} placeholder="Task description" onChange={(event) => updateTaskDraft('description', event.target.value)} style={{ minHeight: 72 }} />
-                  <div className="detail-grid col2">
-                    <input className="form-input" value={taskDraft.specific_time ?? ''} placeholder="Specific time e.g. 5:00 PM" onChange={(event) => updateTaskDraft('specific_time', event.target.value)} />
-                    <input className="form-input" value={taskDraft.recurrence_text ?? ''} placeholder="Recurrence e.g. 1 time every 1 week" onChange={(event) => updateTaskDraft('recurrence_text', event.target.value)} />
-                  </div>
+                  <CareTaskFields draft={taskDraft} onChange={updateTaskDraft} disabled={tasksSaving} />
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                    <button type="button" onClick={cancelTaskEdit} disabled={tasksSaving} style={{ fontSize: 11, fontWeight: 600, background: 'none', color: 'var(--muted)', border: '1px solid var(--line)', borderRadius: 6, padding: '7px 12px', cursor: 'pointer' }}>Cancel</button>
-                    <button type="button" onClick={saveTask} disabled={tasksSaving} style={{ fontSize: 11, fontWeight: 700, background: '#2567a4', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', cursor: 'pointer' }}>{tasksSaving ? 'Saving...' : 'Save'}</button>
+                    <button type="button" onClick={cancelTaskEdit} disabled={tasksSaving} className={recordStyles.cancel}>Cancel</button>
+                    <button type="button" onClick={saveTask} disabled={tasksSaving} className={recordStyles.save}>{tasksSaving ? 'Saving...' : 'Save'}</button>
                   </div>
                 </div>
               </div>
@@ -833,15 +662,10 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
             {editingTaskId === 'new' && taskDraft ? (
               <div style={{ padding: '14px 16px', border: '1px solid #c8dff0', borderRadius: 8, background: '#f8fbff' }}>
                 <div style={{ display: 'grid', gap: 10 }}>
-                  <input className="form-input" value={taskDraft.title ?? ''} placeholder="Task title" onChange={(event) => updateTaskDraft('title', event.target.value)} />
-                  <textarea className="form-textarea" value={taskDraft.description ?? ''} placeholder="Task description" onChange={(event) => updateTaskDraft('description', event.target.value)} style={{ minHeight: 72 }} />
-                  <div className="detail-grid col2">
-                    <input className="form-input" value={taskDraft.specific_time ?? ''} placeholder="Specific time e.g. 5:00 PM" onChange={(event) => updateTaskDraft('specific_time', event.target.value)} />
-                    <input className="form-input" value={taskDraft.recurrence_text ?? ''} placeholder="Recurrence e.g. 1 time every 1 week" onChange={(event) => updateTaskDraft('recurrence_text', event.target.value)} />
-                  </div>
+                  <CareTaskFields draft={taskDraft} onChange={updateTaskDraft} disabled={tasksSaving} />
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                    <button type="button" onClick={cancelTaskEdit} disabled={tasksSaving} style={{ fontSize: 11, fontWeight: 600, background: 'none', color: 'var(--muted)', border: '1px solid var(--line)', borderRadius: 6, padding: '7px 12px', cursor: 'pointer' }}>Cancel</button>
-                    <button type="button" onClick={saveTask} disabled={tasksSaving} style={{ fontSize: 11, fontWeight: 700, background: '#2567a4', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', cursor: 'pointer' }}>{tasksSaving ? 'Saving...' : 'Save'}</button>
+                    <button type="button" onClick={cancelTaskEdit} disabled={tasksSaving} className={recordStyles.cancel}>Cancel</button>
+                    <button type="button" onClick={saveTask} disabled={tasksSaving} className={recordStyles.save}>{tasksSaving ? 'Saving...' : 'Save'}</button>
                   </div>
                 </div>
               </div>
@@ -852,17 +676,12 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
                 <div key={task.id} style={{ padding: '14px 16px', border: '1px solid var(--line-soft)', borderRadius: 8, background: '#fff' }}>
                   {isEditingTask && taskDraft ? (
                     <div style={{ display: 'grid', gap: 10 }}>
-                      <input className="form-input" value={taskDraft.title ?? ''} placeholder="Task title" onChange={(event) => updateTaskDraft('title', event.target.value)} />
-                      <textarea className="form-textarea" value={taskDraft.description ?? ''} placeholder="Task description" onChange={(event) => updateTaskDraft('description', event.target.value)} style={{ minHeight: 72 }} />
-                      <div className="detail-grid col2">
-                        <input className="form-input" value={taskDraft.specific_time ?? ''} placeholder="Specific time e.g. 5:00 PM" onChange={(event) => updateTaskDraft('specific_time', event.target.value)} />
-                        <input className="form-input" value={taskDraft.recurrence_text ?? ''} placeholder="Recurrence e.g. 1 time every 1 week" onChange={(event) => updateTaskDraft('recurrence_text', event.target.value)} />
-                      </div>
+                      <CareTaskFields draft={taskDraft} onChange={updateTaskDraft} disabled={tasksSaving} />
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <button type="button" onClick={() => removeTask(task.id)} disabled={tasksSaving} style={{ fontSize: 11, fontWeight: 600, background: 'none', color: '#d56b6b', border: '1px solid var(--danger-line)', borderRadius: 6, padding: '7px 12px', cursor: 'pointer' }}>Remove Task</button>
+                        <button type="button" onClick={() => removeTask(task.id)} disabled={tasksSaving} className="care-task-icon-button danger" title="Delete task" aria-label={`Delete task: ${task.title}`}><TaskActionIcon action="delete" /></button>
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <button type="button" onClick={cancelTaskEdit} disabled={tasksSaving} style={{ fontSize: 11, fontWeight: 600, background: 'none', color: 'var(--muted)', border: '1px solid var(--line)', borderRadius: 6, padding: '7px 12px', cursor: 'pointer' }}>Cancel</button>
-                          <button type="button" onClick={saveTask} disabled={tasksSaving} style={{ fontSize: 11, fontWeight: 700, background: '#2567a4', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 14px', cursor: 'pointer' }}>{tasksSaving ? 'Saving...' : 'Save'}</button>
+                          <button type="button" onClick={cancelTaskEdit} disabled={tasksSaving} className={recordStyles.cancel}>Cancel</button>
+                          <button type="button" onClick={saveTask} disabled={tasksSaving} className={recordStyles.save}>{tasksSaving ? 'Saving...' : 'Save'}</button>
                         </div>
                       </div>
                     </div>
@@ -871,23 +690,16 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 6 }}>
                         <div style={{ fontSize: 13, fontWeight: 700 }}>{task.title}</div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                          <button type="button" onClick={() => startTaskEdit(task)} style={{ fontSize: 11, fontWeight: 600, background: 'none', color: 'var(--primary)', border: '1px solid #c8dff0', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}>Edit Task</button>
+                          <button type="button" onClick={() => startTaskEdit(task)} disabled={tasksSaving} className="care-task-icon-button" title="Edit task" aria-label={`Edit task: ${task.title}`}><TaskActionIcon action="edit" /></button>
                           <button
                             type="button"
-                            onClick={() => toggleTaskCompletion(task)}
-                            disabled={taskActionId === task.id}
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              borderRadius: 999,
-                              padding: '6px 12px',
-                              cursor: taskActionId === task.id ? 'wait' : 'pointer',
-                              border: task.completed_today ? '1px solid #bddbbf' : '1px solid #c8dff0',
-                              background: task.completed_today ? '#edf7ef' : 'var(--primary-soft)',
-                              color: task.completed_today ? '#35693c' : 'var(--primary)',
-                            }}
+                            onClick={() => removeTask(task.id)}
+                            disabled={tasksSaving}
+                            className="care-task-icon-button danger"
+                            title="Delete task"
+                            aria-label={`Delete task: ${task.title}`}
                           >
-                            {taskActionId === task.id ? 'Saving...' : task.completed_today ? 'Undo Complete' : 'Mark Complete'}
+                            <TaskActionIcon action="delete" />
                           </button>
                         </div>
                       </div>
@@ -913,38 +725,30 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
         ) : null}
       </div>
 
-      <EditSection title="Coordinator Notes" editing={!!editing.notes} onEdit={() => startEdit('notes')} onSave={() => save('notes')}>
+      <EditSection title="Coordinator Notes" editing={!!editing.notes} saving={carePlanSaving} onEdit={() => startEdit('notes')} onSave={() => save('notes')} onCancel={() => {
+        set('notes', detail?.care_plan_notes ?? '');
+        setEditing(p => ({ ...p, notes: false }));
+        setCarePlanError('');
+      }}>
         {editing.notes ? (
           <textarea
             className="form-textarea"
             value={vals.notes}
+            disabled={carePlanSaving}
             onChange={(e) => set('notes', e.target.value)}
-            style={{ minHeight: 100, fontSize: 12, width: '100%' }}
+            style={{ minHeight: 100, fontSize: 12, fontFamily: 'inherit', width: '100%' }}
           />
         ) : (
-          <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 6, border: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--text)', lineHeight: 1.65 }}>
+          <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 6, border: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--text)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
             {vals.notes}
           </div>
         )}
       </EditSection>
+      {carePlanError && <p role="alert" className="error-text">{carePlanError}</p>}
     </div>
   );
 }
 
-function GoalProgressTab() {
-  return (
-    <div>
-      <div className="detail-section">
-        <div className="detail-section-title">Goals &amp; Progress</div>
-        <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 6, border: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--muted)' }}>
-          Goal tracking coming soon.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Tab: Visits ──────────────────────────────────────── */
 function VisitsTab({ clientId }: { clientId: number }) {
   const { user } = useAuth();
   const [visits, setVisits] = useState<ClientVisitItem[]>([]);
@@ -1181,9 +985,9 @@ export function ClientTabs({ client, clientId }: { client: ClientSummary; client
         {active === 'profile'   && <ProfileTab c={client} clientId={clientId} />}
         {active === 'address'   && <AddressTab c={client} clientId={clientId} />}
         {active === 'careplan'  && <CarePlanTabInner clientId={clientId} />}
-        {active === 'goals'     && <GoalProgressTab />}
-        {active === 'insurance' && <InsuranceTab clientId={clientId} medicaidId={null} />}
-        {active === 'auths'     && <AuthorizationsTab clientId={clientId} />}
+        {active === 'goals'     && <ClientRecordEditor clientId={clientId} kind="goals" />}
+        {active === 'insurance' && <ClientRecordEditor clientId={clientId} kind="insurance" />}
+        {active === 'auths'     && <ClientRecordEditor clientId={clientId} kind="authorizations" />}
         {active === 'visits'    && <VisitsTab clientId={clientId} />}
         {active === 'billing'   && <BillingTab />}
         {active === 'documents' && <DocumentsTab clientId={clientId} />}

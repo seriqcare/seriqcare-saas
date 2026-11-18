@@ -67,7 +67,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace('/');
+    router.replace(result.role === 'super_admin' ? '/super-admin' : '/');
   };
 
   if (isLoading) return null;
@@ -88,7 +88,7 @@ export default function LoginPage() {
           <div className="brand" style={{ margin: 0 }}>Seriq<span>Care</span></div>
         </div>
 
-        <h3 className="login-title" style={{ textAlign: 'center' }}>Welcome back</h3>
+        {/* <h3 className="login-title" style={{ textAlign: 'center' }}>Welcome back</h3> */}
         <p className="login-subtitle" style={{ textAlign: 'center' }}>Sign in to access the home care operations dashboard.</p>
 
         <form onSubmit={onSubmit}>
@@ -97,14 +97,15 @@ export default function LoginPage() {
             <input id="agency-code" name="agency_code" type="text" className="input" placeholder="Your agency code"
               value={agencyCode} onChange={e => setAgencyCode(e.target.value)} required maxLength={20}
               disabled={submitting || isLocked} autoComplete="organization" autoCapitalize="characters" spellCheck={false} />
+            {agencyCode.trim() === '999' && <p className="form-hint">Platform administrator sign-in</p>}
           </div>
           <div className="form-group">
-            <label className="label" htmlFor="email">Email or Username</label>
+            <label className="label" htmlFor="email">Email</label>
             <input
               id="email"
               type="text"
               className="input"
-              placeholder="Email or username"
+              placeholder="Your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={submitting || isLocked}

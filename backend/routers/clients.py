@@ -489,6 +489,7 @@ def get_client_insurance(
                     p.id,
                     p.payer_id,
                     p.program,
+                    p.waiver_id,
                     w.waiver_code,
                     w.waiver_name,
                     CONVERT(VARCHAR, p.effective_date, 23) AS effective_date,
@@ -496,8 +497,8 @@ def get_client_insurance(
                     p.is_active
                 FROM care.client_payer_info p
                 LEFT JOIN care.waivers w ON w.id = p.waiver_id
-                WHERE p.client_id = :client_id AND p.is_active = 1
-                ORDER BY p.effective_date DESC
+                WHERE p.client_id = :client_id
+                ORDER BY p.is_active DESC, p.effective_date DESC, p.id DESC
             """),
             {"client_id": client_id},
         ).fetchall()
@@ -506,6 +507,7 @@ def get_client_insurance(
             ClientPayerItem(
                 id=int(r.id),
                 payer_id=str(r.payer_id),
+                waiver_id=r.waiver_id,
                 program=str(r.program),
                 waiver_code=r.waiver_code,
                 waiver_name=r.waiver_name,
@@ -535,6 +537,7 @@ def get_client_authorizations(
             text("""
                 SELECT
                     sa.id,
+                    sa.service_code_id, sa.provider_id,
                     sc.hcpcs_code                                               AS service_code,
                     sc.description                                              AS service_description,
                     sa.auth_number,
@@ -551,6 +554,7 @@ def get_client_authorizations(
                     sa.is_active
                 FROM care.service_authorizations sa
                 JOIN care.service_codes sc ON sc.id = sa.service_code_id
+                JOIN care.clients c ON c.id = sa.client_id AND c.agency_id = sa.agency_id
                 WHERE sa.client_id = :client_id
                 ORDER BY sa.is_active DESC, sa.service_end_date DESC
             """),
@@ -561,6 +565,7 @@ def get_client_authorizations(
             ClientAuthItem(
                 id=int(r.id),
                 service_code=str(r.service_code),
+                service_code_id=r.service_code_id, provider_id=r.provider_id,
                 service_description=str(r.service_description),
                 auth_number=r.auth_number,
                 authorized_units=round(float(r.authorized_units or 0), 2),
@@ -1111,7 +1116,6 @@ def update_client(
     from backend.schemas import ClientUpdateResponse
     try:
         _ensure_client_exists(client_id, db, scope)
-        now_local = now_eastern_naive()
         # Build dynamic SET clause from non-None fields
         set_parts: list[str] = []
         params: dict = {"client_id": client_id}
@@ -1153,10 +1157,10 @@ def update_client(
         if set_parts:
             db.execute(
                 text(
-                    f"UPDATE care.clients SET {', '.join(set_parts)}, updated_at = :now_local "
+                    f"UPDATE care.clients SET {', '.join(set_parts)} "
                     "WHERE id = :client_id AND is_active = 1"
                 ),
-                {**params, "now_local": now_local},
+                params,
             )
 
         # Update address if address fields provided

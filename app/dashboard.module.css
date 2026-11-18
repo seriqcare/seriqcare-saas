@@ -1,0 +1,60 @@
+.panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 220px;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.panels > :global(.card) {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.panels :global(.activity-bars) {
+  height: 120px;
+}
+
+.panels :global(.card-header) {
+  flex-wrap: wrap;
+}
+
+.panels :global(.coming-soon-wrap) {
+  min-height: 120px;
+}
+
+.authorizations { display: grid; gap: 14px; }
+.authorization { min-width: 0; }
+.authorizationHeading, .authorizationDetails {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.authorizationHeading a { font-size: 12px; font-weight: 600; color: var(--primary); }
+.authorizationDetails { margin-top: 5px; font-size: 11px; color: var(--muted); }
+.authorizationProgress {
+  display: block;
+  width: 100%;
+  height: 7px;
+  margin-top: 6px;
+  border: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--line-soft);
+  accent-color: var(--primary);
+}
+.authorizationProgress::-webkit-progress-bar { background: var(--line-soft); }
+.authorizationProgress::-webkit-progress-value { background: var(--primary); }
+.authorizationProgress::-moz-progress-bar { background: var(--primary); }
+.authorizationProgress[data-warning='true'] { accent-color: var(--warning-text); }
+.authorizationProgress[data-warning='true']::-webkit-progress-value { background: var(--warning-text); }
+.authorizationProgress[data-warning='true']::-moz-progress-bar { background: var(--warning-text); }
+
+@media (max-width: 760px) {
+  .panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -45,6 +45,7 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import require_role
 from backend.auth.tenant import verified_user_agency
+from backend.auth.constants import PLATFORM_LOGIN_CODE
 from backend.services.auth_tokens import (
     ACCESS_TOKEN_MINUTES,
     REFRESH_GRACE_WINDOW_SECONDS,
@@ -365,19 +366,20 @@ async def login(
             headers={"Retry-After": str(retry_after)},
         )
 
-    user = _run_with_transient_retry(
-        db,
-        lambda: (
-            db.query(User).join(Agency, Agency.id == User.agency_id).filter(
-                User.is_active == True,
-                Agency.is_active == True,
+    def find_login_user():
+        if body.agency_code == PLATFORM_LOGIN_CODE:
+            if body.client_type != 'web':
+                return None
+            query = db.query(User).filter(User.is_active == True, User.role == 'super_admin')
+        else:
+            query = db.query(User).join(Agency, Agency.id == User.agency_id).filter(
+                User.is_active == True, Agency.is_active == True,
                 func.upper(Agency.agency_code) == body.agency_code,
                 User.role != 'super_admin',
-            ).filter(
-                (User.email == login_identity) | (User.username == login_identity)
-            ).first()
-        ),
-    )
+            )
+        return query.filter((User.email == login_identity) | (User.username == login_identity)).first()
+
+    user = _run_with_transient_retry(db, find_login_user)
     ip = request.client.host if request.client else None
 
     if not user or not _verify_password(body.password, user.password_hash):
@@ -541,7 +543,7 @@ async def refresh(
         "display_name": user.display_name,
         "role": user.role,
         "agency_id": user.agency_id,
-        "agency_code": agency.agency_code if agency else None,
+        "agency_code": PLATFORM_LOGIN_CODE if user.role == 'super_admin' else agency.agency_code if agency else None,
         "employee_id": user.employee_id,
         "agency_tier": agency_tier,
         "agency_aggregator": agency_aggregator,
@@ -915,6 +917,7 @@ def entra_login(
         role=user.role,
         agency_id=user.agency_id,
         employee_id=user.employee_id,
+        agency_code=PLATFORM_LOGIN_CODE if user.role == 'super_admin' else None,
     )
 
 
@@ -929,12 +932,14 @@ _SMTP_FROM = os.getenv("SMTP_FROM", "noreply@seriqcare.com")
 _FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 
 
-def _send_reset_email(to_email: str, reset_token: str) -> None:
+def _send_reset_email(to_email: str, reset_token: str, agency_id: int | None, agency_code: str) -> None:
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
     reset_link = f"{_FRONTEND_BASE_URL}/reset-password?token={reset_token}"
+    from html import escape
+    account_details = f'Agency Code: {agency_code}\nAgency ID: {agency_id if agency_id is not None else "Platform"}\nEmail: {to_email}'
 
     html_body = f"""
 <!DOCTYPE html>
@@ -964,6 +969,7 @@ def _send_reset_email(to_email: str, reset_token: str) -> None:
                       font-size:13px;">
               RESET PASSWORD
             </a>
+            <pre style="font-family:Arial,sans-serif;font-size:13px;color:#444;white-space:pre-wrap;">{escape(account_details)}</pre>
             <p style="color:#666;margin:24px 0 0;font-size:13px;">
               If you did not request a password reset, you can safely ignore this email.
               Your password will not change.
@@ -981,7 +987,7 @@ def _send_reset_email(to_email: str, reset_token: str) -> None:
     msg["Subject"] = "Reset your SeriqCare password"
     msg["From"] = _SMTP_FROM
     msg["To"] = to_email
-    msg.attach(MIMEText(f"Reset your password: {reset_link}\n\nThis link expires in one hour.", "plain"))
+    msg.attach(MIMEText(f"{account_details}\n\nReset your password: {reset_link}\n\nThis link expires in one hour.", "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
     with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT) as server:
@@ -993,6 +999,7 @@ def _send_reset_email(to_email: str, reset_token: str) -> None:
 
 def _send_onboarding_email(
     to_email: str, reset_token: str, contact_name: str, agency_name: str,
+    agency_id: int, agency_code: str,
 ) -> None:
     """Welcome email sent when super admin provisions a new agency."""
     import smtplib
@@ -1000,6 +1007,9 @@ def _send_onboarding_email(
     from email.mime.text import MIMEText
 
     set_password_link = f"{_FRONTEND_BASE_URL}/reset-password?token={reset_token}"
+    from html import escape
+    account_details = f'Agency Code: {agency_code}\nAgency ID: {agency_id}\nEmail: {to_email}'
+    contact_name_html, agency_name_html = escape(contact_name), escape(agency_name)
 
     html_body = f"""
 <!DOCTYPE html>
@@ -1017,10 +1027,10 @@ def _send_onboarding_email(
         <tr>
           <td style="padding:40px 30px;">
             <h1 style="margin:0 0 8px;font-size:24px;color:#1a1a1a;font-weight:400;">
-              Welcome to <strong>SeriqCare</strong>, {contact_name}!
+              Welcome to <strong>SeriqCare</strong>, {contact_name_html}!
             </h1>
             <p style="color:#444;margin:16px 0 8px;">
-              Your agency <strong>{agency_name}</strong> has been set up on the SeriqCare platform.
+              Your agency <strong>{agency_name_html}</strong> has been set up on the SeriqCare platform.
               To get started, set your password using the button below.
             </p>
             <p style="color:#444;margin:0 0 24px;">
@@ -1032,6 +1042,7 @@ def _send_onboarding_email(
                       font-size:13px;">
               SET YOUR PASSWORD
             </a>
+            <pre style="font-family:Arial,sans-serif;font-size:13px;color:#444;white-space:pre-wrap;">{escape(account_details)}</pre>
             <p style="color:#666;margin:24px 0 0;font-size:13px;">
               If you did not expect this email, please contact your SeriqCare administrator.
             </p>
@@ -1051,6 +1062,7 @@ def _send_onboarding_email(
     msg.attach(MIMEText(
         f"Welcome to SeriqCare, {contact_name}!\n\n"
         f"Your agency {agency_name} has been set up.\n"
+        f"{account_details}\nUse your Agency Code when signing in.\n\n"
         f"Set your password here (link expires in 24 hours):\n{set_password_link}\n",
         "plain",
     ))
@@ -1067,7 +1079,13 @@ def _send_onboarding_email(
 # POST /forgot-password — request a password reset email
 # ---------------------------------------------------------------------------
 class ForgotPasswordRequest(BaseModel):
+    agency_code: str = Field(min_length=1, max_length=20)
     email: str
+
+    @field_validator('agency_code')
+    @classmethod
+    def normalize_agency_code(cls, value: str) -> str:
+        return LoginRequest.normalize_agency_code(value)
 
 
 @router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -1080,18 +1098,17 @@ def forgot_password(
     to prevent user enumeration.
     """
     email = body.email.strip().lower()
-    user = db.query(User).filter(
-        User.is_active == True,
-        User.email.isnot(None),
-    ).filter(
-        User.email == email
-    ).first()
+    if body.agency_code == PLATFORM_LOGIN_CODE:
+        query = db.query(User).filter(User.role == 'super_admin')
+    else:
+        query = db.query(User).join(Agency, Agency.id == User.agency_id).filter(
+            User.role != 'super_admin', Agency.is_active == True,
+            func.upper(Agency.agency_code) == body.agency_code,
+        )
+    user = query.filter(User.is_active == True, func.lower(User.email) == email).first()
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No account found with that email address.",
-        )
+        return
 
     # Invalidate any existing unused tokens for this user
     now = datetime.utcnow()
@@ -1113,7 +1130,7 @@ def forgot_password(
     db.commit()
 
     try:
-        _send_reset_email(user.email, raw_token)
+        _send_reset_email(user.email, raw_token, user.agency_id, body.agency_code)
     except Exception as exc:
         log.error(f"Failed to send password reset email to {email}: {exc}")
         # Still return 204 — token is saved, user can retry
@@ -1123,8 +1140,46 @@ def forgot_password(
 # ---------------------------------------------------------------------------
 # POST /reset-password — confirm reset with token + new password
 # ---------------------------------------------------------------------------
-class ResetPasswordRequest(BaseModel):
-    token: str
+class PasswordResetContextRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=256)
+
+
+def _password_reset_context(token: str, db: Session):
+    invalid = HTTPException(status_code=400, detail='This reset link is invalid or has expired. Please request a new one.')
+    record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == hash_token(token.strip()),
+        PasswordResetToken.used_at == None,
+        PasswordResetToken.expires_at > datetime.utcnow(),
+    ).first()
+    if not record:
+        raise invalid
+    user = db.query(User).filter(User.id == record.user_id, User.is_active == True).first()
+    if not user or not user.email:
+        raise invalid
+    try:
+        agency = verified_user_agency(db, user)
+    except HTTPException:
+        raise invalid
+    agency_record = db.get(Agency, user.agency_id) if agency else None
+    context = {
+        'agency_id': user.agency_id,
+        'agency_code': agency.agency_code if agency else PLATFORM_LOGIN_CODE,
+        'agency_name': agency_record.name if agency_record else 'Platform administration',
+        'email': user.email,
+    }
+    return record, user, context
+
+
+@router.post('/password-reset-context')
+def password_reset_context(body: PasswordResetContextRequest, db: Session = Depends(get_db)):
+    # Identity is resolved from the valid, single-use token, never URL parameters.
+    return _password_reset_context(body.token, db)[2]
+
+
+class ResetPasswordRequest(PasswordResetContextRequest):
+    agency_id: int | None = Field(..., gt=0)
+    agency_code: str = Field(min_length=1, max_length=20)
+    email: str = Field(min_length=1)
     new_password: str
 
 
@@ -1141,24 +1196,20 @@ def reset_password(
         )
 
     now = datetime.utcnow()
-    token_hash = hash_token(body.token.strip())
-    record = db.query(PasswordResetToken).filter(
-        PasswordResetToken.token_hash == token_hash,
-        PasswordResetToken.used_at == None,
+    record, user, context = _password_reset_context(body.token, db)
+    if (body.agency_id != context['agency_id']
+            or body.agency_code.strip().upper() != context['agency_code'].strip().upper()
+            or body.email.strip().casefold() != context['email'].strip().casefold()):
+        raise HTTPException(status_code=400, detail='Agency and email do not match this password setup link.')
+
+    # Claim the unused token atomically so concurrent requests cannot reuse it.
+    claimed = db.query(PasswordResetToken).filter(
+        PasswordResetToken.id == record.id, PasswordResetToken.used_at == None,
         PasswordResetToken.expires_at > now,
-    ).first()
-
-    if not record:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This reset link is invalid or has expired. Please request a new one.",
-        )
-
-    user = db.query(User).filter(User.id == record.user_id, User.is_active == True).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User not found.")
-
-    record.used_at = now
+    ).update({'used_at': now}, synchronize_session=False)
+    if claimed != 1:
+        db.rollback()
+        raise HTTPException(status_code=400, detail='This reset link has already been used or has expired.')
     user.password_hash = _hash_password(body.new_password)
     db.commit()
     write_audit(

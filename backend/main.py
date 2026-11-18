@@ -70,7 +70,7 @@ from db.database import engine
 
 log = logging.getLogger("seriqcare.readiness")
 from backend.routers import (
-    dashboard, clients, schedule, visits, caregivers,
+    dashboard, clients, client_records, schedule, visits, caregivers,
     auth, aggregator, timesheets, settings, billing,
     super_admin, documentation,
 )
@@ -154,6 +154,7 @@ def readiness():
 app.include_router(auth.router,        prefix="/api/auth",        tags=["Auth"])
 app.include_router(dashboard.router,   prefix="/api/dashboard",   tags=["Dashboard"])
 app.include_router(clients.router,     prefix="/api/clients",     tags=["Clients"])
+app.include_router(client_records.router, prefix="/api/clients", tags=["Clients"])
 app.include_router(schedule.router,    prefix="/api/schedule",    tags=["Schedule"])
 app.include_router(visits.router,      prefix="/api/visits",      tags=["Visits"])
 app.include_router(caregivers.router,  prefix="/api/caregivers",  tags=["Caregivers"])

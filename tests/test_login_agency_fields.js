@@ -4,8 +4,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function harness(file) {
-  const state = [], submissions = [];
+function harness(file, role) {
+  const state = [], submissions = [], redirects = [];
   let cursor = 0, tree;
   const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props };
   const module = { exports: {} };
@@ -21,9 +21,9 @@ function harness(file) {
         useEffect() {}, useRef: initial => ({ current: initial }), useCallback: fn => fn, useMemo: fn => fn(),
       };
       if (name.endsWith('auth-context')) return { useAuth: () => ({ user: null, isLoading: false }) };
-      if (name.endsWith('use-login-flow')) return { useLoginFlow: () => ({ phase: 'idle', submit: async (...values) => { submissions.push(values); return { ok: true }; } }) };
+      if (name.endsWith('use-login-flow')) return { useLoginFlow: () => ({ phase: 'idle', submit: async (...values) => { submissions.push(values); return { ok: true, role }; } }) };
       if (name.endsWith('use-active-visit')) return { useActiveVisit: () => ({ activeVisit: null, activeVisitStatus: 'ready' }) };
-      if (name === 'next/navigation') return { useRouter: () => ({ replace() {} }) };
+      if (name === 'next/navigation') return { useRouter: () => ({ replace(path) { redirects.push(path); } }) };
       if (name === 'next/link') return { default: 'a' };
       if (name.endsWith('turnstile-widget')) return { default: 'captcha', turnstileEnabled: false };
       if (name.endsWith('.css')) return { default: new Proxy({}, { get: (_, key) => key }) };
@@ -39,6 +39,7 @@ function harness(file) {
   render();
   return {
     submissions,
+    redirects,
     find: fn => nodes().find(fn),
     fill(identifier, value) {
       const input = nodes().find(node => node.type === 'input' && (node.props.id === identifier || node.props.placeholder === identifier));
@@ -48,6 +49,21 @@ function harness(file) {
     async submit() { await nodes().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); render(); },
   };
 }
+
+test('reserved code signs in through the normal web form and redirects by verified role', async () => {
+  const h = harness('app/login/page.tsx', 'super_admin');
+  h.fill('agency-code', '999'); h.fill('email', 'platform.admin'); h.fill('password', 'test-password');
+  await h.submit();
+  assert.deepEqual(h.submissions[0].slice(0, 3), ['999', 'platform.admin', 'test-password']);
+  assert.deepEqual(h.redirects, ['/super-admin']);
+});
+
+test('an agency user still lands on the agency dashboard', async () => {
+  const h = harness('app/login/page.tsx', 'agency_admin');
+  h.fill('agency-code', 'ACME'); h.fill('email', 'first.admin'); h.fill('password', 'test-password');
+  await h.submit();
+  assert.deepEqual(h.redirects, ['/']);
+});
 
 for (const [page, file, agency, username, password] of [
   ['web', 'app/login/page.tsx', 'agency-code', 'email', 'password'],

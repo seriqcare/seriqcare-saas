@@ -1,0 +1,20 @@
+.header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line-soft); margin-bottom: 14px; }
+.header > :global(.detail-section-title) { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+.editor { margin-bottom: 16px; }
+.fields { grid-template-columns: repeat(3, minmax(0, 1fr)); border: 0; padding: 0; margin: 0; min-width: 0; }
+.fields label { min-width: 0; }
+.fields :global(.form-input), .fields :global(.form-select) { font-family: inherit; font-size: 12px; padding: 7px 10px; }
+.fields :global(.form-textarea) { font-family: inherit; font-size: 12px; min-height: 68px; }
+.wide { grid-column: 1 / -1; }
+.actions { display: flex; gap: 6px; }
+.save, .cancel, .edit { font-family: inherit; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer; }
+.save { font-weight: 700; background: #2567a4; color: #fff; border: none; padding: 5px 14px; }
+.cancel { background: none; color: var(--muted); border: 1px solid var(--line); padding: 5px 10px; }
+.edit { background: none; color: var(--primary); border: 1px solid #c8dff0; padding: 5px 12px; }
+.save:disabled, .cancel:disabled, .edit:disabled { opacity: .6; cursor: default; }
+.hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.cell { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 280px; }
+.progress { display: flex; align-items: center; gap: 6px; }
+.progress progress { width: 70px; accent-color: var(--primary); }
+.toast { position: fixed; right: 20px; bottom: 20px; z-index: 100; padding: 12px 18px; border-radius: 6px; background: var(--success-bg); border: 1px solid var(--success-line); color: var(--success-text); box-shadow: 0 4px 18px #0002; }
+@media (max-width: 760px) { .fields { grid-template-columns: minmax(0, 1fr); } }

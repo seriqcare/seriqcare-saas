@@ -1,10 +1,10 @@
 import { getAuthHeaders } from './server-auth';
 
 const API_TIMEOUT_MS = Number(process.env.API_TIMEOUT_MS ?? 4000);
-const READ_REVALIDATE_SECONDS = 30;
 
 const FALLBACK: DashboardMetrics = {
   activeClients: 0,
+  newClientsThisMonth: 0,
   carePlansExpiringSoon: 0,
   scheduledVisitsThisWeek: 0,
   openShifts: 0,
@@ -15,6 +15,8 @@ const FALLBACK: DashboardMetrics = {
   evvProcessed: 0,
   evvVerified: 0,
   evvIncomplete: 0,
+  evvInProgress: 0,
+  evvPendingVerification: 0,
   evvOmit: 0,
   pendingSubmissions: 0,
   rejectedSubmissions: 0,
@@ -36,6 +38,7 @@ export interface PriorityItem {
 
 export interface DashboardMetrics {
   activeClients: number;
+  newClientsThisMonth: number;
   carePlansExpiringSoon: number;
   scheduledVisitsThisWeek: number;
   openShifts: number;
@@ -46,6 +49,8 @@ export interface DashboardMetrics {
   evvProcessed: number;
   evvVerified: number;
   evvIncomplete: number;
+  evvInProgress: number;
+  evvPendingVerification: number;
   evvOmit: number;
   pendingSubmissions: number;
   rejectedSubmissions: number;
@@ -58,6 +63,32 @@ export interface CaregiverUtilization {
   name: string;
   scheduled_hours: number;
   utilization_pct: number;
+}
+
+export interface DashboardAuthorization {
+  auth_id: number;
+  client_id: number;
+  client_name: string;
+  service_code: string | null;
+  auth_number: string | null;
+  authorized_units: number;
+  used_units: number;
+  days_until_expiry: number | null;
+}
+
+export async function getDashboardAuthorizations(): Promise<DashboardAuthorization[]> {
+  const headers = await getAuthHeaders();
+  for (const base of buildApiBases()) {
+    let response: Response;
+    try {
+      response = await fetch(`${base}/api/dashboard/authorizations`, {
+        headers, cache: 'no-store', signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      });
+    } catch { continue; }
+    if (!response.ok) throw new Error(`Authorization tracker request failed (HTTP ${response.status})`);
+    return response.json();
+  }
+  throw new Error('Authorization tracker is unavailable');
 }
 
 export async function getCaregiverUtilization(): Promise<CaregiverUtilization[]> {
@@ -84,7 +115,7 @@ async function fetchWithTimeout(url: string, ms = 8000, headers?: HeadersInit): 
   const timer = setTimeout(() => controller.abort(), ms);
   try {
     return await fetch(url, {
-      next: { revalidate: READ_REVALIDATE_SECONDS },
+      cache: 'no-store',
       signal: controller.signal,
       headers,
     });

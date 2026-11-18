@@ -19,7 +19,7 @@ export type AuthUser = {
   agency_aggregator: string | null; // 'sandata' | 'hhax' | null
 };
 
-export type SignInResult = { ok: true } | { ok: false; error: string; retryAfter?: number };
+export type SignInResult = { ok: true; role?: AuthUser['role'] } | { ok: false; error: string; retryAfter?: number };
 
 type AuthContextType = {
   user: AuthUser | null;
@@ -399,7 +399,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         agency_tier: data.agency_tier ?? null,
         agency_aggregator: data.agency_aggregator ?? null,
       });
-      return { ok: true };
+      return { ok: true, role: data.role };
     } catch {
       return { ok: false, error: 'Cannot connect to server. Is the backend running?' };
     }

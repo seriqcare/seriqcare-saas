@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/components/auth-context';
 import {
   submitSingleVisit,
@@ -157,17 +158,25 @@ interface Props {
   historyTotal: number;
   mode: 'simulate' | 'live';
   aggregator: string;  // '' | 'sandata' | 'hhax'
+  initialTab?: 'queue' | 'history';
+  historyPage?: number;
 }
 
-export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal, mode, aggregator }: Props) {
+export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal, mode, aggregator, initialTab = 'queue', historyPage = 1 }: Props) {
   const { apiFetch } = useAuth();
-  const [tab, setTab] = useState<'queue' | 'history'>('queue');
+  const [tab, setTab] = useState<'queue' | 'history'>(initialTab);
   const [queue, setQueue] = useState(initialQueue);
   const [history, setHistory] = useState(initialHistory);
   const [batchState, setBatchState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
   const [batchResult, setBatchResult] = useState<BatchSubmitResult | null>(null);
   const [batchError, setBatchError] = useState('');
   const [notifications, setNotifications] = useState<string[]>([]);
+  useEffect(() => { setQueue(initialQueue); }, [initialQueue]);
+  useEffect(() => { setHistory(initialHistory); }, [initialHistory]);
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
+
+  const historyPages = Math.max(1, Math.ceil(historyTotal / 50));
+  const historyHref = (page: number) => `/evv?${new URLSearchParams({ aggregator, tab: 'history', history_page: String(page) })}`;
 
   const isHhax = aggregator === 'hhax';
   const aggLabel = isHhax ? 'HHAeXchange' : 'Sandata';
@@ -207,7 +216,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
   return (
     <div>
       {/* Mode badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
         <span style={{
           fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 10,
           color: modeColor, background: modeBg, letterSpacing: '0.5px',
@@ -216,7 +225,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
         </span>
         {mode === 'simulate' && (
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-            Set SANDATA_MODE=live in .env to enable real Sandata submissions
+            Simulation mode — no data is sent to the aggregator.
           </span>
         )}
       </div>
@@ -330,7 +339,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)', fontSize: 14 }}>
-              All verified visits have been submitted.
+              No visits are ready for submission.
             </div>
           )}
         </div>
@@ -341,7 +350,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
         <div>
           {history.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)', fontSize: 14 }}>
-              No submissions recorded yet.
+              No submissions recorded for this agency yet.
             </div>
           ) : (
             <div className="mini-table-wrap">
@@ -390,6 +399,14 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
               </table>
             </div>
           )}
+          {historyTotal > 0 && <div className="pagination" style={{ paddingTop: 14 }}>
+            <div>Showing {Math.min((historyPage - 1) * 50 + 1, historyTotal)}–{Math.min((historyPage - 1) * 50 + history.length, historyTotal)} of {historyTotal} submissions</div>
+            <div className="page-controls">
+              {historyPage > 1 && <Link className="btn secondary" href={historyHref(historyPage - 1)} style={{ display: 'inline-flex', alignItems: 'center' }}>Previous</Link>}
+              <span>Page {historyPage} of {historyPages}</span>
+              {historyPage < historyPages && <Link className="btn secondary" href={historyHref(historyPage + 1)} style={{ display: 'inline-flex', alignItems: 'center' }}>Next</Link>}
+            </div>
+          </div>}
         </div>
       )}
     </div>

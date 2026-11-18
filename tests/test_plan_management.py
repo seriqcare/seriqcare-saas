@@ -92,6 +92,16 @@ class PlanManagementTests(unittest.TestCase):
         self.assertEqual(self.update({'tier': 'core'}), 404)
         self.assertEqual(self.db.writes, [])
 
+    def test_creation_reserves_platform_code(self):
+        result = asyncio.run(request(self.app, 'POST', '/api/super-admin/agencies', {
+            'agency_code': ' 999 ', 'name': 'Platform', 'tier': 'core',
+            'primary_contact_name': 'Admin', 'primary_contact_email': 'admin@example.com',
+            'admin_username': 'admin',
+        }))
+        self.assertEqual(result, 422)
+        self.assertEqual(self.db.commits, 0)
+        self.assertEqual(self.db.writes, [])
+
     def test_creation_rejects_planned_plan_before_any_insert(self):
         result = asyncio.run(request(self.app, 'POST', '/api/super-admin/agencies', {
             'agency_code': 'ACME', 'name': 'Acme', 'tier': 'evvplus',

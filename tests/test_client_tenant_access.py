@@ -141,6 +141,16 @@ class ClientTenantAccessTests(unittest.TestCase):
         self.assertEqual(self.call("PUT", "/api/clients/10", {"first_name": "Updated"}), 200)
         self.assertTrue(any("UPDATE care.clients" in sql for sql, _ in self.db.queries))
 
+    def test_coordinator_notes_and_clearing_are_written_to_client(self):
+        self.authenticate(user())
+        for note in ('Follow up Monday.\nCall the guardian.', ''):
+            self.assertEqual(self.call('PUT', '/api/clients/10', {'care_plan_notes': note}), 200)
+            writes = [(sql, params) for sql, params in self.db.queries if 'UPDATE care.clients' in sql]
+            self.assertIn('care_plan_notes = :care_plan_notes', writes[-1][0])
+            self.assertEqual(writes[-1][1]['care_plan_notes'], note)
+            self.assertNotIn('updated_at', writes[-1][0])
+            self.assertNotIn('now_local', writes[-1][1])
+
     def test_staff_can_read_and_edit_own_client_tasks(self):
         self.authenticate(user())
         response = clients.ClientCareTasksResponse(client_id=10, date="2026-01-01", items=[])

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import unittest
+from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -139,6 +140,74 @@ class AgencyAuthTests(unittest.TestCase):
 
     def test_platform_admin_password_login_cannot_select_a_tenant(self):
         with self.assertRaises(HTTPException): self.login('ACME','platform.admin')
+
+    def platform_web_login(self, password='correct-password'):
+        response = Response()
+        result = asyncio.run(auth.login(auth.LoginRequest(
+            agency_code=' 999 ', username='platform.admin', password=password, client_type='web',
+        ), self.request, response, self.db))
+        return result, response
+
+    def test_reserved_code_authenticates_super_admin_without_an_agency_record(self):
+        result, response = self.platform_web_login()
+        self.assertEqual(result.role, 'super_admin')
+        self.assertEqual(result.agency_code, '999')
+        self.assertIsNone(result.agency_id)
+        self.assertIsNone(result.refresh_token)
+        self.assertIn('HttpOnly', response.headers['set-cookie'])
+        self.assertEqual(self.authenticate(result.access_token).id, 40)
+        claims = jwt.decode(result.access_token, auth_tokens._SECRET, algorithms=['HS256'])
+        self.assertEqual(claims['agency_code'], '999')
+        self.assertIsNone(claims['agency_id'])
+        self.assertEqual(self.db.query(Agency).count(), 2)
+
+    def test_platform_refresh_retains_reserved_code_and_null_agency(self):
+        result, response = self.platform_web_login()
+        cookie = SimpleCookie()
+        cookie.load(response.headers['set-cookie'])
+        rt = cookie[auth._RT_COOKIE].value
+        self.assertTrue(auth_tokens.refresh_token_matches_agency(rt, None))
+        req = Request({'type': 'http', 'headers': [(b'cookie', f'{auth._RT_COOKIE}={rt}'.encode())]})
+        refreshed = asyncio.run(auth.refresh(req, Response(), auth.RefreshRequest(), self.db))
+        self.assertEqual(refreshed['agency_code'], '999')
+        self.assertIsNone(refreshed['agency_id'])
+        self.assertEqual(self.authenticate(refreshed['access_token']).id, 40)
+
+    def test_reserved_code_cannot_authenticate_regular_agency_users(self):
+        for username in ('first.admin', 'first.mobile', 'shared@example.com'):
+            with self.assertRaises(HTTPException) as error:
+                self.login('999', username, client_type='web')
+            self.assertEqual(error.exception.status_code, 401)
+        self.assertEqual(self.db.query(DeviceSession).count(), 0)
+
+    def test_reserved_code_does_not_allow_mobile_platform_login(self):
+        with self.assertRaises(HTTPException) as error:
+            self.login('999', 'platform.admin', client_type='mobile')
+        self.assertEqual(error.exception.status_code, 401)
+        self.assertEqual(self.db.query(DeviceSession).count(), 0)
+
+    def test_inactive_platform_account_and_wrong_password_are_rejected(self):
+        with self.assertRaises(HTTPException): self.platform_web_login('wrong-password')
+        self.db.get(User, 40).is_active = False
+        self.db.commit()
+        with self.assertRaises(HTTPException): self.platform_web_login()
+        self.assertEqual(self.db.query(DeviceSession).count(), 0)
+
+    def test_platform_claim_code_cannot_be_changed(self):
+        result, _ = self.platform_web_login()
+        claims = jwt.decode(result.access_token, auth_tokens._SECRET, algorithms=['HS256'])
+        for code in ('ACME', None):
+            changed = jwt.encode({**claims, 'agency_code': code}, auth_tokens._SECRET, algorithm='HS256')
+            with self.assertRaises(HTTPException): self.authenticate(changed)
+
+    def test_legacy_agency_with_reserved_code_cannot_authenticate_or_refresh(self):
+        response = self.login()
+        self.db.get(Agency, 1).agency_code = '999'
+        self.db.commit()
+        with self.assertRaises(HTTPException): self.login('999', 'first.admin', client_type='web')
+        with self.assertRaises(HTTPException): self.authenticate(response.access_token)
+        with self.assertRaises(HTTPException):
+            asyncio.run(auth.refresh(self.request, Response(), auth.RefreshRequest(refresh_token=response.refresh_token), self.db))
 
     def test_public_signup_cannot_provision_an_agency_account(self):
         app = FastAPI()

@@ -32,7 +32,7 @@ export function CreateAgencyWizard({ apiFetch, onClose, onCreated }: Props) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState<{
-    id: number; username: string; email: string; email_sent: boolean;
+    id: number; agency_code: string; username: string; email: string; email_sent: boolean;
   } | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -115,7 +115,7 @@ export function CreateAgencyWizard({ apiFetch, onClose, onCreated }: Props) {
         return;
       }
       const data = await res.json();
-      setSuccess({ id: data.id, username: data.admin_user.username, email: data.admin_user.email, email_sent: data.email_sent });
+      setSuccess({ id: data.id, agency_code: data.agency_code ?? form.agency_code.trim().toUpperCase(), username: data.admin_user.username, email: data.admin_user.email, email_sent: data.email_sent });
     } catch {
       setError('Unable to confirm agency creation. Check the agency list before trying again.');
     } finally { setSaving(false); }
@@ -177,9 +177,9 @@ export function CreateAgencyWizard({ apiFetch, onClose, onCreated }: Props) {
 
             {success ? (
               <div className="aw-success-content">
-                <div className="aw-created-id"><span>Agency ID</span><strong>{success.id}</strong><p>Use this ID when signing in to this agency.</p></div>
+                <div className="aw-created-id"><span>Agency Code</span><strong>{success.agency_code}</strong><p>Use this code when signing in to this agency.</p><p>Agency ID: <b>{success.id}</b></p></div>
                 {review('Administrator', 2, [['Username', success.username], ['Email', success.email]])}
-                <p className={success.email_sent ? 'aw-note' : 'sa-error'}>{success.email_sent ? `An email with a password setup link has been sent to ${success.email}.` : 'The onboarding email could not be sent. The administrator can use Forgot Password with the Agency ID and email above.'}</p>
+                <p className={success.email_sent ? 'aw-note' : 'sa-error'}>{success.email_sent ? `An email with a password setup link has been sent to ${success.email}.` : 'The onboarding email could not be sent. The administrator can use Forgot Password with the Agency Code and email above.'}</p>
               </div>
             ) : <fieldset className="aw-fields" disabled={saving}>
               {step === 0 && <>

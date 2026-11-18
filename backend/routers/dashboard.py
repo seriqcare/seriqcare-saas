@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 
 from db.database import get_db
 from backend.auth.dependencies import AgencyScope, get_agency_scope
-from backend.schemas import CaregiverUtilization, DashboardMetrics, PriorityItem, VisitByDay
-from backend.services.timezone import SQLSERVER_LOCAL_DATE_EXPR, SQLSERVER_LOCAL_WEEK_START_DATE_EXPR
+from backend.schemas import CaregiverUtilization, DashboardAuthorization, DashboardMetrics, PriorityItem, VisitByDay
+from backend.services.timezone import SQLSERVER_EASTERN_NOW_EXPR, SQLSERVER_LOCAL_DATE_EXPR, SQLSERVER_LOCAL_WEEK_START_DATE_EXPR
+from backend.services.evv_reporting import SCHEDULE_JOIN_SQL, clock_out_grace_minutes, exception_predicate
 
 router = APIRouter()
 
@@ -54,12 +55,48 @@ def get_caregiver_utilization(
     ]
 
 
+@router.get("/authorizations", response_model=list[DashboardAuthorization])
+def get_dashboard_authorizations(
+    db: Session = Depends(get_db),
+    scope: AgencyScope = Depends(get_agency_scope),
+):
+    rows = db.execute(
+        text(f"""
+            SELECT sa.id AS auth_id, c.id AS client_id,
+                   c.first_name + ' ' + c.last_name AS client_name,
+                   sc.hcpcs_code AS service_code, sa.auth_number,
+                   sa.authorized_units, sa.used_units,
+                   DATEDIFF(DAY, {SQLSERVER_LOCAL_DATE_EXPR}, sa.service_end_date) AS days_until_expiry
+            FROM care.service_authorizations sa
+            JOIN care.clients c ON c.id = sa.client_id AND c.agency_id = sa.agency_id
+            LEFT JOIN care.service_codes sc ON sc.id = sa.service_code_id
+            WHERE sa.is_active = 1 AND c.is_active = 1 AND {scope.sql_filter('sa')}
+            ORDER BY CASE WHEN sa.service_end_date IS NULL THEN 1 ELSE 0 END,
+                     sa.service_end_date, c.first_name, c.last_name, sa.id
+        """),
+        scope.bind({}),
+    ).fetchall()
+    return [DashboardAuthorization(
+        auth_id=r.auth_id, client_id=r.client_id, client_name=r.client_name,
+        service_code=r.service_code, auth_number=r.auth_number,
+        authorized_units=float(r.authorized_units or 0),
+        used_units=float(r.used_units or 0), days_until_expiry=r.days_until_expiry,
+    ) for r in rows]
+
+
 @router.get("/metrics", response_model=DashboardMetrics)
 def get_dashboard_metrics(
     db: Session = Depends(get_db),
     scope: AgencyScope = Depends(get_agency_scope),
 ):
     try:
+        exception_sql = exception_predicate(
+            now_sql=SQLSERVER_EASTERN_NOW_EXPR,
+            deadline_sql='DATEADD(MINUTE, :clock_out_grace, s.scheduled_end)',
+        )
+        evv_params = scope.bind({'clock_out_grace': clock_out_grace_minutes()})
+        # Match the visit's schedule within the same tenant and client/employee.
+        schedule_join = SCHEDULE_JOIN_SQL
         # ------------------------------------------------------------------
         # 1. Client stats
         # ------------------------------------------------------------------
@@ -68,6 +105,11 @@ def get_dashboard_metrics(
                 f"""
                 SELECT
                     COUNT(CASE WHEN is_active = 1 THEN 1 END) AS active_clients,
+                    COUNT(CASE WHEN created_at >= DATEFROMPARTS(
+                              YEAR({SQLSERVER_LOCAL_DATE_EXPR}), MONTH({SQLSERVER_LOCAL_DATE_EXPR}), 1)
+                          AND created_at < DATEADD(MONTH, 1, DATEFROMPARTS(
+                              YEAR({SQLSERVER_LOCAL_DATE_EXPR}), MONTH({SQLSERVER_LOCAL_DATE_EXPR}), 1))
+                          THEN 1 END) AS new_this_month,
                     COUNT(CASE WHEN care_plan_review_date IS NOT NULL
                           AND DATEDIFF(DAY, {SQLSERVER_LOCAL_DATE_EXPR},
                               TRY_CAST(care_plan_review_date AS DATE)) BETWEEN 0 AND 30
@@ -138,7 +180,7 @@ def get_dashboard_metrics(
         # ------------------------------------------------------------------
         # 4. EVV status breakdown (current week)
         # evvProcessed → Adjusted, evvVerified → Verified,
-        # evvIncomplete → Pending+Failed, evvOmit → Exempt
+        # Pending active/completed visits are separate from actual exceptions.
         # ------------------------------------------------------------------
         evv_row = db.execute(
             text(
@@ -146,16 +188,24 @@ def get_dashboard_metrics(
                 SELECT
                     COUNT(CASE WHEN ev.evv_status = 'Adjusted'                    THEN 1 END) AS evv_processed,
                     COUNT(CASE WHEN ev.evv_status = 'Verified'                    THEN 1 END) AS evv_verified,
-                    COUNT(CASE WHEN ev.evv_status IN ('Pending','Failed')          THEN 1 END) AS evv_incomplete,
+                    COUNT(CASE WHEN {exception_sql} THEN 1 END) AS evv_incomplete,
+                    COUNT(CASE WHEN ev.evv_status = 'Pending'
+                        AND COALESCE(ev.adj_in_datetime, ev.call_in_datetime) IS NOT NULL
+                        AND COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NULL
+                        AND NOT {exception_sql} THEN 1 END) AS evv_in_progress,
+                    COUNT(CASE WHEN ev.evv_status = 'Pending'
+                        AND COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
+                        THEN 1 END) AS evv_pending_verification,
                     COUNT(CASE WHEN ev.evv_status = 'Exempt'                      THEN 1 END) AS evv_omit
                 FROM care.visits v
                 LEFT JOIN care.visit_evv ev ON ev.visit_id = v.id
+                {schedule_join}
                 WHERE v.visit_cancelled = 0
                   AND {scope.sql_filter("v")}
                                     AND v.service_date >= {SQLSERVER_LOCAL_WEEK_START_DATE_EXPR}
                 """
             ),
-            scope.bind({}),
+            evv_params,
         ).fetchone()
 
         evv_processed: int = int(evv_row.evv_processed or 0)
@@ -184,22 +234,22 @@ def get_dashboard_metrics(
         rejected_submissions: int = int(agg_row.rejected_submissions or 0)
 
         # ------------------------------------------------------------------
-        # 6. Visit exceptions — derived from visit_evv (care.visit_exceptions
-        #    not yet implemented; Pending+Failed = exceptions, Failed = urgent)
+        # 6. Actual validation failures or overdue missing clock-outs (all dates).
         # ------------------------------------------------------------------
         exc_row = db.execute(
             text(
                 f"""
                 SELECT
-                    COUNT(CASE WHEN ev.evv_status IN ('Pending','Failed') THEN 1 END) AS evv_exceptions,
+                    COUNT(CASE WHEN {exception_sql} THEN 1 END) AS evv_exceptions,
                     COUNT(CASE WHEN ev.evv_status = 'Failed'               THEN 1 END) AS urgent_exceptions
                 FROM care.visits v
                 LEFT JOIN care.visit_evv ev ON ev.visit_id = v.id
+                {schedule_join}
                 WHERE v.visit_cancelled = 0
                   AND {scope.sql_filter("v")}
                 """
             ),
-            scope.bind({}),
+            evv_params,
         ).fetchone()
 
         evv_exceptions: int = int(exc_row.evv_exceptions or 0)
@@ -247,6 +297,14 @@ def get_dashboard_metrics(
         # Priority queue — build from gathered stats
         # ------------------------------------------------------------------
         priority_queue: list[PriorityItem] = []
+
+        missing_clock_outs = evv_exceptions - urgent_exceptions
+        if missing_clock_outs > 0:
+            priority_queue.append(PriorityItem(
+                title=f'{missing_clock_outs} Missing Clock-out(s)',
+                sub=f'Scheduled end plus {evv_params["clock_out_grace"]}-minute grace period exceeded',
+                type='warning',
+            ))
 
         if urgent_exceptions > 0:
             priority_queue.append(
@@ -304,6 +362,7 @@ def get_dashboard_metrics(
 
         return DashboardMetrics(
             activeClients=active_clients,
+            newClientsThisMonth=int(client_row.new_this_month or 0),
             carePlansExpiringSoon=expiring_soon,
             scheduledVisitsThisWeek=scheduled_this_week,
             openShifts=open_shifts,
@@ -314,6 +373,8 @@ def get_dashboard_metrics(
             evvProcessed=evv_processed,
             evvVerified=evv_verified,
             evvIncomplete=evv_incomplete,
+            evvInProgress=int(getattr(evv_row, 'evv_in_progress', 0) or 0),
+            evvPendingVerification=int(getattr(evv_row, 'evv_pending_verification', 0) or 0),
             evvOmit=evv_omit,
             pendingSubmissions=pending_submissions,
             rejectedSubmissions=rejected_submissions,

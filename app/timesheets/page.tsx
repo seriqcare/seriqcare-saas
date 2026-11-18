@@ -140,26 +140,22 @@ export default async function TimesheetsPage({
         <div className="summary-card">
           <div className="summary-label">Total Hours</div>
           <div className="summary-sub-label">{appliedPeriod.label}</div>
-          <div className="summary-value">{stats.total_hours.toFixed(1)}</div>
-          <div className="summary-sub-value">hrs</div>
+          <div className="summary-value" style={{ gridColumn: '1 / -1' }}>{(stats.total_hours ?? 0).toFixed(1)} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--muted)' }}>hrs</span></div>
         </div>
         <div className="summary-card">
           <div className="summary-label">Pending Approval</div>
           <div className="summary-sub-label">Awaiting Review</div>
-          <div className="summary-value">{stats.pending}</div>
-          <div className="summary-sub-value">entries</div>
+          <div className="summary-value" style={{ gridColumn: '1 / -1' }}>{stats.pending ?? 0} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--muted)' }}>entries</span></div>
         </div>
         <div className="summary-card">
           <div className="summary-label">Approved</div>
           <div className="summary-sub-label">Ready for Payroll</div>
-          <div className="summary-value">{stats.approved}</div>
-          <div className="summary-sub-value">visits</div>
+          <div className="summary-value" style={{ gridColumn: '1 / -1' }}>{stats.approved ?? 0} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--muted)' }}>visits</span></div>
         </div>
         <div className="summary-card">
           <div className="summary-label">EVV Exceptions</div>
           <div className="summary-sub-label">Requires Review</div>
-          <div className="summary-value">{stats.exceptions}</div>
-          <div className="summary-sub-value">alerts</div>
+          <div className="summary-value" style={{ gridColumn: '1 / -1' }}>{stats.exceptions ?? 0} <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--muted)' }}>alerts</span></div>
         </div>
       </section>
 

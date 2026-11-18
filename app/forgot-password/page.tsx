@@ -8,6 +8,7 @@ import type { TurnstileInstance } from '@marsidev/react-turnstile';
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
 
 export default function ForgotPasswordPage() {
+  const [agencyCode, setAgencyCode] = useState('');
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -20,6 +21,11 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setEmailError('');
     setServerError('');
+
+    if (!agencyCode.trim()) {
+      setServerError('Enter your agency code.');
+      return;
+    }
 
     if (!email.trim()) {
       setEmailError('Enter your email');
@@ -38,15 +44,10 @@ export default function ForgotPasswordPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: email.trim(),
+          agency_code: agencyCode.trim().toUpperCase(),
           ...(cfToken ? { cf_turnstile_token: cfToken } : {}),
         }),
       });
-      if (res.status === 404) {
-        setEmailError('No account found with that email address.');
-        setCfToken('');
-        turnstileRef.current?.reset();
-        return;
-      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setServerError(data.detail ?? 'Something went wrong. Please try again.');
@@ -77,7 +78,7 @@ export default function ForgotPasswordPage() {
           <>
             <h1 className="login-title">Check your email</h1>
             <p className="login-subtitle">
-              If an account exists for <strong>{email}</strong>, you will receive a password
+              If an account exists for <strong>{email}</strong> under agency <strong>{agencyCode.trim().toUpperCase()}</strong>, you will receive a password
               reset link shortly. The link expires in one hour.
             </p>
             <div style={{ marginTop: 24, textAlign: 'center', fontSize: 13, color: 'var(--muted)' }}>
@@ -90,10 +91,16 @@ export default function ForgotPasswordPage() {
           <>
             <h3 className="login-title">Want to reset your password?</h3>
             <p className="login-subtitle">
-              Enter your email and we&apos;ll send you a link to reset your password.
+              Enter your agency code and email and we&apos;ll send you a link to reset your password.
             </p>
 
             <form onSubmit={onSubmit} noValidate>
+              <div className="form-group">
+                <label className="label" htmlFor="agency-code">Agency Code</label>
+                <input id="agency-code" name="agency_code" className="input" value={agencyCode}
+                  onChange={event => setAgencyCode(event.target.value)} placeholder="Your agency code"
+                  maxLength={20} required disabled={submitting} autoComplete="organization" autoCapitalize="characters" spellCheck={false} />
+              </div>
               <div className="form-group" style={{ marginTop: 20 }}>
                 <label className="label" htmlFor="email">
                   <span style={{ color: '#c0392b' }}>*</span> Email
