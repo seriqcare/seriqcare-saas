@@ -171,7 +171,7 @@ test('network failures do not replay query writes', async () => {
     let calls = 0;
     const fetch = async () => { calls++; throw new TypeError('network'); };
     const customRequire = name => name === './server-auth'
-      ? { getAuthHeaders: async () => ({}) } : require(name);
+      ? { getAuthHeaders: async () => ({}) } : name.endsWith('client-events') ? { notifyClientDataChanged() {} } : require(name);
     const mod = compile(path, { fetch, process, console }, customRequire);
     try { await mod[name](...args); } catch { /* Some APIs report failures by throwing. */ }
     assert.equal(calls, 1, `${name} must submit only once`);

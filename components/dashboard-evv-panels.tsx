@@ -22,7 +22,7 @@ function buildAlerts(m: DashboardMetrics) {
   return alerts;
 }
 
-export function DashboardEvvPanels({ metrics: m }: { metrics: DashboardMetrics }) {
+export function DashboardEvvPanels({ metrics: m, embedded = false }: { metrics: DashboardMetrics; embedded?: boolean }) {
   const { user, isLoading } = useAuth();
   if (isLoading || !user || user.agency_tier === 'core') return null;
 
@@ -30,7 +30,7 @@ export function DashboardEvvPanels({ metrics: m }: { metrics: DashboardMetrics }
   const alerts = buildAlerts(m);
 
   return (
-    <div className="dash-row">
+    <div className={embedded ? undefined : 'dash-row'} style={embedded ? { display: 'contents' } : undefined}>
       <div className="card">
         <div className="card-header">
           <div>
@@ -57,7 +57,7 @@ export function DashboardEvvPanels({ metrics: m }: { metrics: DashboardMetrics }
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div style={{ marginTop: embedded ? 8 : 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <div className="note-item">
                 <div className="note-title">Pending Submission</div>
                 <div className="note-sub">{m.pendingSubmissions} visits ready for Sandata</div>

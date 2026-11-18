@@ -369,7 +369,7 @@ def build_visit_simulator_payload(row: Any, now_utc: datetime) -> list[dict]:
         "ProcedureCode":           hcpcs,
         "Modifier1":               "NULL",
         "VisitTimeZone":           "US/Eastern",
-        "BillVisit":               True,
+        "BillVisit":               "true",
     }
 
     adj_in  = _fmt(getattr(row, "adj_in_datetime",  None))

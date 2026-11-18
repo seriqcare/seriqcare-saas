@@ -21,6 +21,7 @@ export interface BillingEntry {
 }
 
 export interface BillingStats {
+  missing_rate_visits?: number;
   total_visits: number;
   total_units: number;
   total_estimated_amount: number;

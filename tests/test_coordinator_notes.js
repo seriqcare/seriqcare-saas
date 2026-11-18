@@ -36,6 +36,7 @@ async function harness(store = { note: '' }) {
       if (name === 'next/link') return { default: 'a' };
       if (name.endsWith('auth-context')) return { useAuth: () => ({ user: { token: 'token' }, apiFetch }) };
       if (name.endsWith('client-record-editor')) return { ClientRecordEditor: 'RecordEditor' };
+      if (name.endsWith('client-tab-refresh')) return { useClientTabRevision: () => 0, notifyClientDataChanged() {} };
       if (name.endsWith('.css')) return { default: new Proxy({}, { get: (_, key) => key }) };
       if (name.endsWith('queries/clients')) return {
         getClientDetail: async () => ({ care_plan_notes: store.note }),

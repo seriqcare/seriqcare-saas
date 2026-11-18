@@ -373,9 +373,8 @@ def create_caregiver(
 
         now_utc = now_eastern_naive()
 
-        prov_row = db.execute(
-            text("SELECT TOP 1 provider_id_sandata FROM care.providers WHERE is_active = 1 ORDER BY id")
-        ).fetchone()
+        from backend.services.agency_providers import agency_sandata_provider
+        prov_row = agency_sandata_provider(db, scope.agency_id)
         provider_id = str(prov_row.provider_id_sandata or "") if prov_row else ""
 
         if not provider_id:

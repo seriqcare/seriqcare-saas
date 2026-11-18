@@ -16,6 +16,22 @@ from backend.services.evv_reporting import SCHEDULE_JOIN_SQL, clock_out_grace_mi
 
 router = APIRouter()
 
+_AGGREGATOR_COUNTS_SQL = """
+    SELECT
+        COUNT(CASE WHEN s.status = 'Pending' THEN 1 END) AS pending_submissions,
+        COUNT(CASE WHEN s.status = 'Rejected' THEN 1 END) AS rejected_submissions
+    FROM care.aggregator_submissions s
+    JOIN care.visits v ON v.id = s.visit_id
+    WHERE {agency_filter}
+      AND v.visit_cancelled = 0
+      AND NOT EXISTS (
+          SELECT 1 FROM care.aggregator_submissions newer
+          WHERE newer.visit_id = s.visit_id
+            AND newer.aggregator = s.aggregator
+            AND newer.id > s.id
+      )
+"""
+
 _UTILIZATION_SQL = f"""
     SELECT e.id, e.first_name + ' ' + e.last_name AS name,
            COALESCE(SUM(CASE WHEN s.scheduled_end > s.scheduled_start
@@ -214,19 +230,10 @@ def get_dashboard_metrics(
         evv_omit: int = int(evv_row.evv_omit or 0)
 
         # ------------------------------------------------------------------
-        # 5. Aggregator submissions
+        # 5. Current submission state, not historical failed attempts.
         # ------------------------------------------------------------------
         agg_row = db.execute(
-            text(
-                f"""
-                SELECT
-                    COUNT(CASE WHEN s.status = 'Pending'  THEN 1 END) AS pending_submissions,
-                    COUNT(CASE WHEN s.status = 'Rejected' THEN 1 END) AS rejected_submissions
-                FROM care.aggregator_submissions s
-                JOIN care.visits v ON v.id = s.visit_id
-                WHERE {scope.sql_filter("v")}
-                """
-            ),
+            text(_AGGREGATOR_COUNTS_SQL.format(agency_filter=scope.sql_filter("v"))),
             scope.bind({}),
         ).fetchone()
 

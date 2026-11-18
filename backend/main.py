@@ -94,6 +94,11 @@ async def lifespan(app: FastAPI):
         f"Service Principal: {'enabled' if use_service_principal else 'disabled'} | "
         f"Key Vault: {'enabled' if use_key_vault else 'disabled'}"
     )
+    from backend.services.billing_rates import ensure_service_rates_table
+    try:
+        ensure_service_rates_table(engine)
+    except Exception:
+        log.exception("Could not initialize agency service rates")
     yield
 
     print("[shutdown] SeriqCare backend stopped")

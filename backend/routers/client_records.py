@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.auth.dependencies import AgencyScope
 from backend.routers.clients import _ensure_client_exists, get_client_agency_scope
 from backend.services.timezone import SQLSERVER_LOCAL_DATE_EXPR, SQLSERVER_EASTERN_NOW_EXPR
+from backend.services.evv_reporting import SCHEDULE_JOIN_SQL, clock_out_grace_minutes, exception_predicate
 from db.database import get_db
 
 router = APIRouter()
@@ -73,13 +74,26 @@ def edit_options(client_id: int, db: Session = Depends(get_db), scope: AgencySco
 @router.get('/{client_id}/overview')
 def overview(client_id: int, db: Session = Depends(get_db), scope: AgencyScope = Depends(get_client_agency_scope)):
     agency_id = _client_agency(client_id, db, scope)
+    exceptions = exception_predicate(now_sql=SQLSERVER_EASTERN_NOW_EXPR,
+        deadline_sql='DATEADD(MINUTE, :clock_out_grace, s.scheduled_end)')
     return dict(db.execute(text(f'''
-        SELECT (SELECT COUNT(*) FROM care.visits WHERE client_id = :id AND agency_id = :agency AND visit_cancelled = 0) AS total_visits,
+        SELECT COUNT(*) AS total_visits,
+               CAST(COALESCE(SUM(CASE
+                   WHEN COALESCE(ev.adj_in_datetime, ev.call_in_datetime) IS NOT NULL
+                    AND COALESCE(ev.adj_out_datetime, ev.call_out_datetime) >= COALESCE(ev.adj_in_datetime, ev.call_in_datetime)
+                   THEN DATEDIFF(MINUTE, COALESCE(ev.adj_in_datetime, ev.call_in_datetime),
+                       COALESCE(ev.adj_out_datetime, ev.call_out_datetime)) / 60.0
+                   ELSE 0 END), 0) AS FLOAT) AS total_hours,
+               COUNT(CASE WHEN {exceptions} THEN 1 END) AS evv_exceptions,
                (SELECT COUNT(*) FROM care.service_authorizations
                 WHERE client_id = :id AND agency_id = :agency AND is_active = 1
                   AND service_start_date <= {SQLSERVER_LOCAL_DATE_EXPR}
                   AND service_end_date >= {SQLSERVER_LOCAL_DATE_EXPR}) AS active_authorizations
-    '''), {'id': client_id, 'agency': agency_id}).mappings().one())
+        FROM care.visits v
+        LEFT JOIN care.visit_evv ev ON ev.visit_id=v.id
+        {SCHEDULE_JOIN_SQL}
+        WHERE v.client_id=:id AND v.agency_id=:agency AND v.visit_cancelled=0
+    '''), {'id': client_id, 'agency': agency_id, 'clock_out_grace': clock_out_grace_minutes()}).mappings().one())
 
 
 @router.get('/{client_id}/goals')

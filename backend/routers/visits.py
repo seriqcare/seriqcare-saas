@@ -3,6 +3,7 @@ GET /api/visits
 Returns paginated visit / timesheet records with EVV and approval status.
 """
 from __future__ import annotations
+from backend.services.visit_lock import visit_edit_locked_sql
 
 from datetime import date, datetime, timedelta
 
@@ -217,7 +218,9 @@ def get_visits(
                     CAST(ev.call_in_longitude  AS FLOAT) AS clock_in_lon,
                     CAST(ev.call_out_latitude  AS FLOAT) AS clock_out_lat,
                     CAST(ev.call_out_longitude AS FLOAT) AS clock_out_lon,
+                    (SELECT COUNT(*) FROM care.aggregator_submissions sub WHERE sub.visit_id=v.id AND sub.aggregator='sandata') AS sandata_submission_count,
                     vi.sandata_status,
+                    CASE WHEN {visit_edit_locked_sql()} THEN 1 ELSE 0 END AS edit_locked,
                     vi.hhax_status
                 FROM care.visits v
                 JOIN care.employees e        ON v.employee_id = e.id
@@ -250,6 +253,8 @@ def get_visits(
                 clock_out_lat=float(r.clock_out_lat) if r.clock_out_lat is not None else None,
                 clock_out_lon=float(r.clock_out_lon) if r.clock_out_lon is not None else None,
                 sandata_status=str(r.sandata_status) if r.sandata_status is not None else None,
+                sandata_submission_count=int(getattr(r, 'sandata_submission_count', 0) or 0),
+                edit_locked=bool(getattr(r, 'edit_locked', False)),
                 hhax_status=str(r.hhax_status) if r.hhax_status is not None else None,
             )
             for r in visit_rows
@@ -319,9 +324,11 @@ def fix_visit(
     try:
         row = db.execute(
             text(f"""
-                SELECT v.id, v.service_date, ev.evv_status
+                SELECT v.id, v.service_date, ev.evv_status,
+                    CASE WHEN {visit_edit_locked_sql()} THEN 1 ELSE 0 END AS edit_locked
                 FROM   care.visits    v
                 JOIN   care.visit_evv ev ON ev.visit_id = v.id
+                LEFT JOIN care.visit_integration_status vi ON vi.visit_id=v.id
                 WHERE  v.id = :id AND v.visit_cancelled = 0 AND {scope.sql_filter('v')}
             """),
             scope.bind({"id": visit_id}),
@@ -329,6 +336,8 @@ def fix_visit(
 
         if not row:
             raise HTTPException(status_code=404, detail=f"Visit {visit_id} not found.")
+        if getattr(row, 'edit_locked', False):
+            raise HTTPException(status_code=409, detail='Submitted or accepted visits are read-only and cannot be edited.')
         if row.evv_status not in ("Pending", "Failed"):
             raise HTTPException(
                 status_code=422,

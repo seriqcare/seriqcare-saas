@@ -25,7 +25,10 @@ from backend.schemas import (
 )
 from db.database import get_db
 
+from backend.routers.service_rates import router as service_rates_router
+
 router = APIRouter()
+router.include_router(service_rates_router)
 
 # Settings are persisted to a JSON file next to the backend package.
 _SETTINGS_DIR  = Path(__file__).parent.parent.parent / "settings"
@@ -242,7 +245,7 @@ def get_agency(
         row = db.execute(
             text(
                 """
-                SELECT name, aggregator
+                SELECT name, aggregator, primary_contact_email
                 FROM care.agencies
                 WHERE id = :id
                 """
@@ -251,6 +254,7 @@ def get_agency(
         ).fetchone()
         if row is not None:
             settings["agencyName"] = row.name or settings.get("agencyName", "")
+            settings["email"] = row.primary_contact_email or ""
             settings["integration_mode"] = _aggregator_to_mode(row.aggregator)
 
     return AgencySettings(**settings)
@@ -265,9 +269,18 @@ def update_agency(
     try:
         current = _read(scope.agency_id, db)
         patch = body.model_dump(exclude_none=True)
+        # Registration/login identity is owned by Super Admin, not this form.
+        patch.pop("email", None)
         current.update(patch)
 
         if scope.agency_id is not None:
+            registered = db.execute(
+                text("SELECT primary_contact_email FROM care.agencies WHERE id = :id"),
+                {"id": scope.agency_id},
+            ).fetchone()
+            if registered is None:
+                raise HTTPException(404, "Agency not found")
+            current["email"] = registered.primary_contact_email or ""
             agency_name = patch.get("agencyName")
             integration_mode = patch.get("integration_mode")
 
@@ -291,6 +304,9 @@ def update_agency(
         _write(current, scope.agency_id, db)
         db.commit()
         return AgencySettingsResponse(success=True, message="Agency settings saved.")
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Save failed: {exc}") from exc
@@ -351,6 +367,25 @@ def _load_payroll_groups(db: Session) -> list[PayrollGroup]:
     return list(groups.values())
 
 
+def _payroll_response(db: Session, scope: AgencyScope, period: dict) -> PayrollSettingsResponse:
+    from backend.routers.timesheets import _pay_period_window_for_day
+    from backend.services.timezone import now_eastern
+    groups = _load_payroll_groups(db)
+    counts = db.execute(text(f"""
+        SELECT eps.pay_group_id, COUNT(DISTINCT e.id) AS caregiver_count
+        FROM care.employee_payroll_settings eps
+        JOIN care.employees e ON e.id = eps.employee_id
+        WHERE {scope.sql_filter('e')}
+        GROUP BY eps.pay_group_id
+    """), scope.bind({})).fetchall()
+    by_group = {r.pay_group_id: int(r.caregiver_count) for r in counts}
+    for group in groups:
+        group.caregiver_count = by_group.get(group.id, 0)
+    start, end = _pay_period_window_for_day(now_eastern().date(), period)
+    return PayrollSettingsResponse(groups=groups, pay_period=PayrollPayPeriod(**period),
+                                   current_period_start=start.isoformat(), current_period_end=end.isoformat())
+
+
 @router.get("/payroll", response_model=PayrollSettingsResponse)
 def get_payroll_settings(
     db: Session = Depends(get_db),
@@ -358,10 +393,7 @@ def get_payroll_settings(
 ):
     try:
         settings = _read(scope.agency_id, db)
-        return PayrollSettingsResponse(
-            groups=_load_payroll_groups(db),
-            pay_period=PayrollPayPeriod(**_normalize_pay_period(settings.get("pay_period"))),
-        )
+        return _payroll_response(db, scope, _normalize_pay_period(settings.get("pay_period")))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Payroll settings load failed: {exc}") from exc
 
@@ -579,10 +611,7 @@ def update_payroll_settings(
         settings["pay_period"] = normalized_pay_period
         _write(settings, scope.agency_id, db)
         db.commit()
-        return PayrollSettingsResponse(
-            groups=_load_payroll_groups(db),
-            pay_period=PayrollPayPeriod(**normalized_pay_period),
-        )
+        return _payroll_response(db, scope, normalized_pay_period)
     except HTTPException:
         db.rollback()
         raise

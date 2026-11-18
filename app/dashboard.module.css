@@ -1,27 +1,37 @@
 .panels {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: 220px;
+  grid-auto-rows: minmax(0, 1fr);
   gap: 14px;
-  margin-bottom: 14px;
+  overflow: hidden;
 }
 
-.panels > :global(.card) {
+.panels :global(.card) {
   min-width: 0;
   min-height: 0;
   overflow: auto;
 }
 
-.panels :global(.activity-bars) {
-  height: 120px;
-}
+.activity { display: flex; flex-direction: column; }
+.activity :global(.activity-bars) { flex: 1; height: auto; min-height: 0; }
+.activity :global(.card-header) { flex-shrink: 0; }
+.dashboard :global(.summary-row) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.panels :global(.evv-rows) { gap: 3px; }
+.panels :global(.evv-row-label) { font-size: 10px; line-height: 13px; }
+.panels :global(.evv-row-count) { font-size: 11px; }
+.panels :global(.note-item) { padding: 5px 8px; }
+.panels :global(.note-title), .panels :global(.note-sub) { font-size: 10px; }
 
 .panels :global(.card-header) {
   flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
 .panels :global(.coming-soon-wrap) {
-  min-height: 120px;
+  min-height: 0;
+  flex: 1;
 }
 
 .authorizations { display: grid; gap: 14px; }
@@ -56,5 +66,8 @@
 @media (max-width: 760px) {
   .panels {
     grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(160px, 1fr);
+    overflow-y: auto;
   }
+  .dashboard :global(.summary-row) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

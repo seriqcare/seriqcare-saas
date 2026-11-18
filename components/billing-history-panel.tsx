@@ -1,11 +1,12 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/auth-context';
+import { authenticatedDownload } from '@/lib/authenticated-download';
+import { AuthenticatedDownloadButton } from './authenticated-download-button';
 import {
   getClaimsList,
   getClaimDetail,
   updateClaimStatus,
-  claimExportUrl,
   type BillingClaimListItem,
   type BillingClaimDetail,
 } from '@/lib/queries/billing';
@@ -239,17 +240,7 @@ function ClaimDetailModal({
           }}
         >
           {detail && modeConfig.mode === 'SANDATA' && (
-            <a
-              href={claimExportUrl(detail.id, 'csv')}
-              style={{
-                padding: '7px 14px', borderRadius: 5,
-                border: '1px solid #2567a4', background: '#2567a4',
-                fontSize: 12, fontWeight: 600, color: '#fff',
-                textDecoration: 'none', cursor: 'pointer',
-              }}
-            >
-              Export CSV
-            </a>
+            <AuthenticatedDownloadButton endpoint={`/api/billing/claims/${detail.id}/export?format=csv`} filename={`claim-${detail.id}.csv`} />
           )}
           {detail && modeConfig.mode === 'HHAX' && (
             <button
@@ -349,7 +340,8 @@ export function BillingHistoryPanel({ modeConfig }: { modeConfig: ModeConfig }) 
         setSelectedId(claim.id);
         break;
       case 'export_csv':
-        window.open(claimExportUrl(claim.id, 'csv'), '_blank');
+        authenticatedDownload(`/api/billing/claims/${claim.id}/export?format=csv`, `claim-${claim.id}.csv`, apiFetch)
+          .catch(error => alert(error instanceof Error ? error.message : 'Unable to export claim.'));
         break;
       case 'mark_submitted':
         handleStatusChange(claim.id, 'Manually Submitted');

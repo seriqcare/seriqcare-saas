@@ -26,6 +26,7 @@ export interface AggregatorQueueResponse {
 }
 
 export interface SubmissionRecord {
+  can_retry?: boolean;
   id: number;
   visit_id: number;
   aggregator: string | null;

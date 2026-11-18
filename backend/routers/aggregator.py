@@ -54,6 +54,11 @@ def get_aggregator_scope(
 _VISIT_SQL = """
     SELECT
         v.id,
+        (SELECT COUNT(*) FROM care.aggregator_submissions sub
+         WHERE sub.visit_id=v.id AND sub.aggregator='sandata') AS prior_submissions,
+        (SELECT COUNT(*) FROM care.aggregator_submissions sub
+         WHERE sub.visit_id=v.id AND sub.aggregator='sandata'
+         AND sub.status IN ('Accepted','Submitted','Pending')) AS locked_submissions,
         v.service_date,
         v.place_of_service,
         ev.call_in_datetime,
@@ -147,7 +152,7 @@ def _update_sandata_status(
     )
 
 
-def _do_submit(visit_id: int, db: Session, scope: AgencyScope) -> VisitSubmitResponse:
+def _do_submit(visit_id: int, db: Session, scope: AgencyScope, *, allow_retry: bool = False) -> VisitSubmitResponse:
     """Shared logic: build Sandata payload → call API → record result."""
     now_utc = now_eastern_naive()
 
@@ -169,11 +174,13 @@ def _do_submit(visit_id: int, db: Session, scope: AgencyScope) -> VisitSubmitRes
             status_code=422,
             detail="Cannot submit — EVV not yet validated (sandata_status is Draft).",
         )
-    if sandata_status in ("Submitted", "Accepted"):
+    if sandata_status in ("Submitted", "Accepted", "Pending") or getattr(row, 'locked_submissions', 0):
         raise HTTPException(
             status_code=409,
             detail=f"Visit has already been submitted to Sandata (status: {sandata_status}).",
         )
+    if not allow_retry and (getattr(row, 'prior_submissions', 0) or sandata_status in ('Rejected', 'Failed', 'Error')):
+        raise HTTPException(status_code=409, detail='This visit already has a submission attempt. Use Retry from Submission History.')
 
     provider_id_sandata = str(getattr(row, "provider_id_sandata", "") or "")
     if not provider_id_sandata:
@@ -357,7 +364,6 @@ def get_queue(
                   SELECT 1 FROM care.aggregator_submissions sub
                   WHERE sub.visit_id = v.id
                     AND sub.aggregator = '{agg_name}'
-                    AND sub.status = 'Accepted'
               )
             GROUP BY
                 v.id, v.service_date,
@@ -445,6 +451,11 @@ def get_submissions(
                     c.first_name + ' ' + c.last_name               AS client_name,
                     e.first_name + ' ' + e.last_name               AS employee_name,
                     s.submission_type,
+                    CASE WHEN s.aggregator='sandata' AND s.status IN ('Rejected','Error','Failed')
+                        AND NOT EXISTS (SELECT 1 FROM care.aggregator_submissions locked
+                            WHERE locked.visit_id=s.visit_id AND locked.aggregator=s.aggregator
+                            AND locked.status IN ('Accepted','Submitted','Pending'))
+                        THEN 1 ELSE 0 END AS can_retry,
                     s.status,
                     s.response_code,
                     s.response_message,
@@ -470,6 +481,7 @@ def get_submissions(
                 client_name=r.client_name,
                 employee_name=r.employee_name,
                 submission_type=r.submission_type or "Visit",
+                can_retry=bool(getattr(r, 'can_retry', False)),
                 status=r.status,
                 response_code=r.response_code,
                 response_message=r.response_message,
@@ -525,7 +537,6 @@ def batch_submit(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get
                   SELECT 1 FROM care.aggregator_submissions sub
                   WHERE sub.visit_id  = v.id
                     AND sub.aggregator = 'sandata'
-                    AND sub.status     = 'Accepted'
               )
             ORDER BY v.service_date ASC, v.id ASC
         """), scope.bind({})).fetchall()
@@ -601,8 +612,10 @@ def retry_submission(submission_id: int, db: Session = Depends(get_db), scope: A
                 status_code=409,
                 detail="Submission was already accepted — retry not needed.",
             )
+        if sub.status not in ('Rejected', 'Error', 'Failed'):
+            raise HTTPException(status_code=409, detail='Only rejected or failed attempts can be retried.')
 
-        return _do_submit(sub.visit_id, db, scope)
+        return _do_submit(sub.visit_id, db, scope, allow_retry=True)
 
     except HTTPException:
         raise

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import require_role
 from backend.auth.constants import PLATFORM_LOGIN_CODE
+from backend.services.agency_providers import provision_agency_provider
 from backend.services.auth_tokens import hash_token
 from backend.services.timezone import SQLSERVER_LOCAL_DATE_EXPR
 from db.database import get_db
@@ -206,6 +207,8 @@ def create_agency(
         "cemail":     email,
     })
     agency_id = result.fetchone()[0]
+    if body.sandata_provider_id and body.sandata_provider_id.strip():
+        provision_agency_provider(db, agency_id)
 
     # 2. Create agency_admin user (no password — they'll set it via onboarding email)
     user_result = db.execute(text("""
@@ -311,6 +314,8 @@ def update_agency(
     db.execute(
         text(f"UPDATE care.agencies SET {set_clauses} WHERE id = :_id"), updates
     )
+    if 'sandata_provider_id' in updates and updates['sandata_provider_id'].strip():
+        provision_agency_provider(db, agency_id)
     db.commit()
     return {"ok": True}
 

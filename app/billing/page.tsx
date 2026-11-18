@@ -5,8 +5,9 @@ import { QueryTabs } from '@/components/query-tabs';
 import { QuerySearchInput } from '@/components/query-search-input';
 import { VisitPeriodSelect } from '@/components/visit-period-select';
 import { BillingGenerateBtn } from '@/components/billing-generate-btn';
+import { AuthenticatedDownloadButton } from '@/components/authenticated-download-button';
 import { BillingClaimsPanel } from '@/components/billing-claims-panel';
-import { getBillingEntries, getAuthUtilization, getIntegrationMode, billingExportUrl, type BillingEntry, type AuthUtilizationItem } from '@/lib/queries/billing';
+import { getBillingEntries, getAuthUtilization, getIntegrationMode, type BillingEntry, type AuthUtilizationItem } from '@/lib/queries/billing';
 import { BillingHistoryPanel } from '@/components/billing-history-panel';
 import { BillingGenerateAllBtn } from '@/components/billing-generate-all-btn';
 import { getModeConfig, type ModeConfig } from '@/lib/billing-mode-config';
@@ -200,7 +201,7 @@ function ClaimsQueueTable({
                     </td>
                     <td>
                       <div style={{ fontSize: 14, fontWeight: 700 }}>
-                        {fmtCurrency(v.estimated_amount)}
+                        {v.default_rate == null ? <Link href="/settings?tab=billing" style={{ fontSize: 11 }}>Rate not configured</Link> : fmtCurrency(v.estimated_amount)}
                       </div>
                       {v.default_rate != null && (
                         <div style={{ fontSize: 10, color: 'var(--muted)' }}>
@@ -339,13 +340,7 @@ export default async function BillingPage({
           <QuerySearchInput placeholder="Search visit ID, client, or caregiver…" />
           <VisitPeriodSelect current={period} />
           <BillingGenerateAllBtn readyCount={stats.ready_to_bill} period={period} modeConfig={modeConfig} />
-          <a
-            href={billingExportUrl(period)}
-            className="btn secondary"
-            style={{ textDecoration: 'none' }}
-          >
-            Export CSV
-          </a>
+          <AuthenticatedDownloadButton endpoint={`/api/billing/export?period=${encodeURIComponent(period)}`} filename={`billing-${period}.csv`} />
         </div>
       </div>
 
@@ -392,6 +387,10 @@ export default async function BillingPage({
       </div>
 
       {/* ── Main grid ────────────────────────────────────── */}
+      {(stats.missing_rate_visits ?? 0) > 0 && <div role="status" className="card" style={{ padding: '10px 14px', marginBottom: 12, fontSize: 12 }}>
+        {stats.missing_rate_visits} visit(s) have no service rate for their visit date and are excluded from the estimated total. <Link href="/settings?tab=billing">Configure service rates</Link>.
+      </div>}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 290px', gap: 16, alignItems: 'start' }}>
 
         {/* Left column */}

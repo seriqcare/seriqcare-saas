@@ -302,7 +302,7 @@ export default async function VisitsPage({
                           <td>
                             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
                               <VisitRowActions visit={v} />
-                              <VisitSubmitBtn visitId={v.id} evvStatus={v.evv_status} />
+                              {aggregator !== 'hhax' && <VisitSubmitBtn visitId={v.id} evvStatus={v.evv_status} submissionStatus={v.sandata_status} submissionCount={v.sandata_submission_count} />}
                             </div>
                           </td>
                         </tr>

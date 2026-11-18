@@ -240,12 +240,14 @@ function Row({ label, value, flag }: { label: string; value: string; flag?: bool
 /* ── Exported action buttons for each table row ─────── */
 export function VisitRowActions({ visit }: { visit: VisitEntry }) {
   const [modal, setModal] = useState<'view' | 'fix' | 'edit' | null>(null);
+  const locked = Boolean(visit.edit_locked) || [visit.sandata_status, visit.hhax_status].some(status => ['Accepted', 'Submitted', 'Pending'].includes(status || ''));
 
   return (
     <>
       {visit.evv_status === 'Incomplete' && (
         <button
-          onClick={() => setModal('fix')}
+          onClick={() => { if (!locked) setModal('fix'); }}
+          disabled={locked}
           className="action-link"
           style={{ color: '#d56b6b', background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}
         >
@@ -253,9 +255,11 @@ export function VisitRowActions({ visit }: { visit: VisitEntry }) {
         </button>
       )}
       <button
-        onClick={() => setModal('edit')}
+        onClick={() => { if (!locked) setModal('edit'); }}
+        disabled={locked}
+        title={locked ? 'Submitted or accepted visits are read-only.' : 'Edit visit'}
         className="action-link"
-        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}
+        style={{ background: 'none', border: 'none', cursor: locked ? 'not-allowed' : 'pointer', padding: 0, font: 'inherit', color: locked ? 'var(--muted)' : undefined }}
       >
         Edit
       </button>
@@ -268,8 +272,8 @@ export function VisitRowActions({ visit }: { visit: VisitEntry }) {
       </button>
 
       {modal === 'view' && <ViewModal visit={visit} onClose={() => setModal(null)} />}
-      {modal === 'fix'  && <FixModal  visit={visit} onClose={() => setModal(null)} />}
-      {modal === 'edit' && <FixModal  visit={visit} onClose={() => setModal(null)} editMode />}
+      {modal === 'fix' && !locked && <FixModal  visit={visit} onClose={() => setModal(null)} />}
+      {modal === 'edit' && !locked && <FixModal  visit={visit} onClose={() => setModal(null)} editMode />}
     </>
   );
 }

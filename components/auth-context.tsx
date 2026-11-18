@@ -354,6 +354,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bcRef.current?.postMessage({ type: 'SIGNED_OUT' });
     const nextRoute = pathname === '/clock' || pathname.startsWith('/clock/') ? '/clock' : '/login';
     router.replace(nextRoute);
+    router.refresh();
   }, [apiBases, pathname, router]);
 
   // ---------------------------------------------------------------------------
@@ -399,11 +400,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         agency_tier: data.agency_tier ?? null,
         agency_aggregator: data.agency_aggregator ?? null,
       });
+      // Drop prefetched pages from the previous identity before navigating.
+      router.refresh();
       return { ok: true, role: data.role };
     } catch {
       return { ok: false, error: 'Cannot connect to server. Is the backend running?' };
     }
-  }, []);
+  }, [router]);
 
   const value = useMemo<AuthContextType>(
     () => ({ user, isLoading, signIn, signOut, apiFetch, apiBases }),

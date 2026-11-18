@@ -2,11 +2,12 @@
 
 import { FormEvent, ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import settingsStyles from './settings.module.css';
+import { PayrollSettingsPanel } from '@/components/payroll-settings-panel';
+import { ServiceRatesSettings } from '@/components/service-rates-settings';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { HeaderUser } from '@/components/topbar';
 import { useAuth } from '@/components/auth-context';
-import { getAllProviders, getProvider, ProviderId, PAYROLL_PROVIDER_KEY } from '@/lib/payroll/providers';
-import { createBlankPayrollGroup, createDefaultPayPeriod, getPayrollSettings, savePayrollSettings, type PayrollGroup, type PayrollPayPeriod, type PayrollRateItem, type WeekStartDay } from '@/lib/queries/payroll';
 import { AGGREGATOR_SANDATA_KEY, AGGREGATOR_HHAX_KEY } from '@/components/aggregator-off-banner';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
@@ -15,26 +16,6 @@ type Tab = 'general' | 'notifications' | 'billing' | 'security' | 'payroll' | 'i
 type MobileCaregiverOption = { employee_id: number; name: string; employee_code: string; username: string | null };
 type IntegrationFilter = 'all' | 'payroll' | 'aggregator' | 'hr';
 
-const PAY_TYPE_OPTIONS = ['Hourly', 'Per Visit'] as const;
-const PAY_PERIOD_FREQUENCY_OPTIONS = [
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekly', label: 'Weekly' },
-  { value: 'biweekly', label: 'Bi-Weekly' },
-  { value: 'semimonthly', label: 'Semi-Monthly' },
-  { value: 'monthly', label: 'Monthly' },
-] as const;
-const WEEK_START_OPTIONS: { value: WeekStartDay; label: string }[] = [
-  { value: 'monday', label: 'Monday' },
-  { value: 'tuesday', label: 'Tuesday' },
-  { value: 'wednesday', label: 'Wednesday' },
-  { value: 'thursday', label: 'Thursday' },
-  { value: 'friday', label: 'Friday' },
-  { value: 'saturday', label: 'Saturday' },
-  { value: 'sunday', label: 'Sunday' },
-];
-const MONTH_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
-
-/* ── Agency form ──────────────────────────────────────────────────────────── */
 type AgencyForm = {
   agencyName: string; email: string; phone: string;
   address: string; website: string; timezone: string;
@@ -164,92 +145,6 @@ function ErrorBanner({ msg }: { msg: string }) {
   return <div className="error-text" style={{ marginTop: 0 }}>{msg}</div>;
 }
 
-function clonePayrollGroups(groups: PayrollGroup[]) {
-  return groups.map((group) => ({
-    ...group,
-    items: group.items.map((item) => ({ ...item })),
-  }));
-}
-
-function clonePayPeriod(payPeriod: PayrollPayPeriod): PayrollPayPeriod {
-  return {
-    ...payPeriod,
-    semi_monthly_days: [...payPeriod.semi_monthly_days],
-  };
-}
-
-function formatOrdinalDay(day: number) {
-  const remainder = day % 10;
-  const tens = day % 100;
-  if (tens >= 11 && tens <= 13) return `${day}th`;
-  if (remainder === 1) return `${day}st`;
-  if (remainder === 2) return `${day}nd`;
-  if (remainder === 3) return `${day}rd`;
-  return `${day}th`;
-}
-
-function summarizePayPeriod(payPeriod: PayrollPayPeriod) {
-  const weekStartLabel = WEEK_START_OPTIONS.find((option) => option.value === payPeriod.week_starts_on)?.label ?? 'Monday';
-  switch (payPeriod.frequency) {
-    case 'daily':
-      return 'Every calendar day.';
-    case 'weekly':
-      return `Weekly periods beginning on ${weekStartLabel}.`;
-    case 'biweekly':
-      return payPeriod.anchor_date
-        ? `Every 2 weeks, starting ${payPeriod.anchor_date}, with weeks beginning on ${weekStartLabel}.`
-        : `Every 2 weeks, with weeks beginning on ${weekStartLabel}.`;
-    case 'monthly':
-      return `Monthly periods closing on the ${formatOrdinalDay(payPeriod.monthly_day ?? 1)}.`;
-    case 'semimonthly': {
-      const [firstDay = 1, secondDay = 15] = payPeriod.semi_monthly_days;
-      return `Two periods per month, closing on the ${formatOrdinalDay(firstDay)} and ${formatOrdinalDay(secondDay)}.`;
-    }
-    default:
-      return 'Weekly periods beginning on Monday.';
-  }
-}
-
-function normalizePayPeriodForSave(payPeriod: PayrollPayPeriod): PayrollPayPeriod {
-  const semiMonthlyDays = [...payPeriod.semi_monthly_days]
-    .map((day) => Number(day))
-    .filter((day, index, days) => Number.isInteger(day) && day >= 1 && day <= 31 && days.indexOf(day) === index)
-    .sort((left, right) => left - right);
-
-  return {
-    frequency: payPeriod.frequency,
-    week_starts_on: payPeriod.frequency === 'weekly' || payPeriod.frequency === 'biweekly'
-      ? (payPeriod.week_starts_on ?? 'monday')
-      : null,
-    anchor_date: payPeriod.frequency === 'biweekly' ? (payPeriod.anchor_date || null) : null,
-    monthly_day: payPeriod.frequency === 'monthly' ? Number(payPeriod.monthly_day || 1) : null,
-    semi_monthly_days: payPeriod.frequency === 'semimonthly'
-      ? (semiMonthlyDays.length >= 2 ? semiMonthlyDays.slice(0, 2) : [1, 15])
-      : [1, 15],
-  };
-}
-
-function formatPayrollRate(rate: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(rate || 0);
-}
-
-function describePayrollItem(item: PayrollRateItem) {
-  const details = [item.pay_type, formatPayrollRate(item.rate)];
-  if (item.applies_on?.trim()) details.push(item.applies_on.trim());
-  if (item.effective_date) details.push(`Effective ${item.effective_date}`);
-  return details.join(' | ');
-}
-
-const payrollActionButtonStyle = {
-  minWidth: 96,
-  justifyContent: 'center',
-  display: 'inline-flex',
-};
-
-/* ── Integration card logos ──────────────────────────────────────────────── */
 function ISolvedLogo() {
   return (
     <div style={{ width: 48, height: 48, borderRadius: 10, background: '#1c1c2e', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -497,22 +392,6 @@ function SettingsPageContent() {
     return () => { active = false; };
   }, [tab, apiFetch]);
 
-  /* Payroll provider */
-  const [payrollProvider,      setPayrollProvider]      = useState<ProviderId>('universal');
-  const [payrollProviderSaved, setPayrollProviderSaved] = useState(false);
-  const [payGroups, setPayGroups] = useState<PayrollGroup[]>([]);
-  const [payrollLoading, setPayrollLoading] = useState(true);
-  const [payrollMsg, setPayrollMsg] = useState('');
-  const [payrollErr, setPayrollErr] = useState('');
-  const [payrollSaving, setPayrollSaving] = useState(false);
-  const [editingPayrollProvider, setEditingPayrollProvider] = useState(false);
-  const [editingPayGroups, setEditingPayGroups] = useState(false);
-  const [editingPayPeriod, setEditingPayPeriod] = useState(false);
-  const [payrollProviderSnapshot, setPayrollProviderSnapshot] = useState<ProviderId>('universal');
-  const [payGroupsSnapshot, setPayGroupsSnapshot] = useState<PayrollGroup[]>([]);
-  const [payPeriod, setPayPeriod] = useState<PayrollPayPeriod>(createDefaultPayPeriod());
-  const [payPeriodSnapshot, setPayPeriodSnapshot] = useState<PayrollPayPeriod>(createDefaultPayPeriod());
-
   /* Aggregator — Sandata */
   const [sandataCfg,       setSandataCfg]       = useState<SandataForm>(DEFAULT_SANDATA);
   const [sandataAggSaving, setSandataAggSaving] = useState(false);
@@ -558,24 +437,6 @@ function SettingsPageContent() {
   }, [apiFetch]);
 
   useEffect(() => {
-    const stored = localStorage.getItem(PAYROLL_PROVIDER_KEY) as ProviderId | null;
-    if (stored) {
-      setPayrollProvider(stored);
-      setPayrollProviderSnapshot(stored);
-    }
-
-    getPayrollSettings()
-      .then((data) => {
-        setPayGroups(data.groups);
-        setPayGroupsSnapshot(clonePayrollGroups(data.groups));
-        setPayPeriod(clonePayPeriod(data.pay_period));
-        setPayPeriodSnapshot(clonePayPeriod(data.pay_period));
-      })
-      .catch((error: Error) => setPayrollErr(error.message))
-      .finally(() => setPayrollLoading(false));
-  }, []);
-
-  useEffect(() => {
     try {
       const rawS = localStorage.getItem(AGGREGATOR_SANDATA_KEY);
       if (rawS) setSandataCfg(s => ({ ...s, ...JSON.parse(rawS) }));
@@ -589,158 +450,13 @@ function SettingsPageContent() {
     if (searchParams.get('tab') === 'aggregator') {
       setTab('integrations');
       setTimeout(() => aggregatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+    } else if (searchParams.get('tab') === 'billing') {
+      setTab('billing');
     } else if (searchParams.get('tab') === 'security') {
       setTab('security');
     }
   }, [searchParams]);
 
-  /* ── Payroll provider handlers ─────────────────────────────────────────── */
-  const savePayrollProvider = () => {
-    localStorage.setItem(PAYROLL_PROVIDER_KEY, payrollProvider);
-    setPayrollProviderSnapshot(payrollProvider);
-    setEditingPayrollProvider(false);
-    setPayrollProviderSaved(true);
-    setTimeout(() => setPayrollProviderSaved(false), 3000);
-  };
-  const startPayrollProviderEdit = () => {
-    setPayrollProviderSnapshot(payrollProvider);
-    setPayrollProviderSaved(false);
-    setEditingPayrollProvider(true);
-  };
-  const cancelPayrollProviderEdit = () => {
-    setPayrollProvider(payrollProviderSnapshot);
-    setEditingPayrollProvider(false);
-  };
-
-  const updatePayGroup = (groupIndex: number, patch: Partial<PayrollGroup>) => {
-    setPayGroups((current) => current.map((group, index) => index === groupIndex ? { ...group, ...patch } : group));
-  };
-  const updatePayItem = (groupIndex: number, itemIndex: number, patch: Partial<PayrollRateItem>) => {
-    setPayGroups((current) => current.map((group, index) => {
-      if (index !== groupIndex) return group;
-      const nextItems = group.items.map((item, idx) => idx === itemIndex ? { ...item, ...patch } : item);
-      if (patch.is_base_rate) {
-        return { ...group, items: nextItems.map((item, idx) => ({ ...item, is_base_rate: idx === itemIndex })) };
-      }
-      return { ...group, items: nextItems };
-    }));
-  };
-  const addPayGroup = () => setPayGroups((current) => [...current, createBlankPayrollGroup(current.length)]);
-  const startPayGroupsEdit = () => {
-    setPayGroupsSnapshot(clonePayrollGroups(payGroups));
-    setPayrollErr('');
-    setPayrollMsg('');
-    setEditingPayGroups(true);
-  };
-  const cancelPayGroupsEdit = () => {
-    setPayGroups(clonePayrollGroups(payGroupsSnapshot));
-    setPayrollErr('');
-    setEditingPayGroups(false);
-  };
-  const startPayPeriodEdit = () => {
-    setPayPeriodSnapshot(clonePayPeriod(payPeriod));
-    setPayrollErr('');
-    setPayrollMsg('');
-    setEditingPayPeriod(true);
-  };
-  const cancelPayPeriodEdit = () => {
-    setPayPeriod(clonePayPeriod(payPeriodSnapshot));
-    setPayrollErr('');
-    setEditingPayPeriod(false);
-  };
-  const updateSemiMonthlyDay = (dayIndex: 0 | 1, nextValue: number) => {
-    setPayPeriod((current) => {
-      const nextDays = [...current.semi_monthly_days];
-      nextDays[dayIndex] = nextValue;
-      return { ...current, semi_monthly_days: nextDays };
-    });
-  };
-  const removePayGroup = (groupIndex: number) => {
-    setPayGroups((current) => current.filter((_, index) => index !== groupIndex));
-  };
-  const addPayItem = (groupIndex: number) => {
-    setPayGroups((current) => current.map((group, index) => {
-      if (index !== groupIndex) return group;
-      return {
-        ...group,
-        items: [
-          ...group.items,
-          { name: 'Weekdays', pay_type: 'Hourly', rate: 0, applies_on: 'Weekdays', start_time: '', end_time: '', effective_date: '', sort_order: group.items.length, is_base_rate: false },
-        ],
-      };
-    }));
-  };
-  const removePayItem = (groupIndex: number, itemIndex: number) => {
-    setPayGroups((current) => current.map((group, index) => {
-      if (index !== groupIndex) return group;
-      const nextItems = group.items.filter((_, idx) => idx !== itemIndex).map((item, idx) => ({ ...item, sort_order: idx }));
-      if (!nextItems.some((item) => item.is_base_rate) && nextItems[0]) nextItems[0].is_base_rate = true;
-      return { ...group, items: nextItems };
-    }));
-  };
-  const handleSavePayrollGroups = async () => {
-    setPayrollErr('');
-    setPayrollMsg('');
-    setPayrollSaving(true);
-    try {
-      const normalized = payGroups.map((group, groupIndex) => ({
-        ...group,
-        name: group.name.trim(),
-        description: group.description?.trim() || '',
-        items: group.items.map((item, itemIndex) => ({
-          ...item,
-          name: item.name.trim(),
-          pay_type: item.pay_type,
-          rate: Number(item.rate || 0),
-          applies_on: item.applies_on?.trim() || '',
-          start_time: '',
-          end_time: '',
-          effective_date: item.effective_date || '',
-          sort_order: itemIndex,
-          is_base_rate: item.is_base_rate || itemIndex === 0,
-        })),
-      }));
-      const data = await savePayrollSettings({
-        groups: normalized,
-        pay_period: normalizePayPeriodForSave(payPeriod),
-      });
-      setPayGroups(data.groups);
-      setPayGroupsSnapshot(clonePayrollGroups(data.groups));
-      setPayPeriod(clonePayPeriod(data.pay_period));
-      setPayPeriodSnapshot(clonePayPeriod(data.pay_period));
-      setEditingPayGroups(false);
-      setPayrollMsg('Payroll groups saved. Caregiver payroll selectors and timesheets will use the updated rates.');
-      setTimeout(() => setPayrollMsg(''), 4000);
-    } catch (error) {
-      setPayrollErr(error instanceof Error ? error.message : 'Failed to save payroll settings.');
-    } finally {
-      setPayrollSaving(false);
-    }
-  };
-  const handleSavePayPeriod = async () => {
-    setPayrollErr('');
-    setPayrollMsg('');
-    setPayrollSaving(true);
-    try {
-      const data = await savePayrollSettings({
-        groups: payGroups,
-        pay_period: normalizePayPeriodForSave(payPeriod),
-      });
-      setPayGroups(data.groups);
-      setPayGroupsSnapshot(clonePayrollGroups(data.groups));
-      setPayPeriod(clonePayPeriod(data.pay_period));
-      setPayPeriodSnapshot(clonePayPeriod(data.pay_period));
-      setEditingPayPeriod(false);
-      setPayrollMsg('Pay period saved. New payroll cycles will use the updated cadence.');
-      setTimeout(() => setPayrollMsg(''), 4000);
-    } catch (error) {
-      setPayrollErr(error instanceof Error ? error.message : 'Failed to save payroll settings.');
-    } finally {
-      setPayrollSaving(false);
-    }
-  };
-
-  /* ── Aggregator handlers ───────────────────────────────────────────────── */
   const saveSandata = () => {
     setSandataAggErr(''); setSandataAggMsg(''); setSandataAggSaving(true);
     try {
@@ -860,7 +576,6 @@ function SettingsPageContent() {
     finally { setMobileBusy(false); }
   };
 
-  const currentPayrollProvider = getProvider(payrollProvider);
 
   /* ── Visibility helpers ────────────────────────────────────────────────── */
   const showSandata = user?.agency_aggregator === 'sandata' || user?.agency_tier === 'evvplus';
@@ -878,11 +593,18 @@ function SettingsPageContent() {
         <div className="top-actions"><HeaderUser /></div>
       </div>
 
-      <div className="tab-bar" style={{ marginBottom: 18 }}>
+      <div className={settingsStyles.tabs} role="tablist" aria-label="Settings" onKeyDown={event => {
+        const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+        if (!keys.includes(event.key)) return;
+        const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+        const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        event.preventDefault(); tabs[next]?.focus(); tabs[next]?.click();
+      }}>
         {(['general', 'notifications', 'billing', 'security', 'payroll', 'integrations'] as Tab[]).map(t => (
           <button
             key={t}
-            className={`tab-btn${tab === t ? ' active' : ''}`}
+            role="tab" aria-selected={tab === t} tabIndex={tab === t ? 0 : -1}
             onClick={() => setTab(t)}
             style={t === 'integrations' ? { position: 'relative' } : undefined}
           >
@@ -919,8 +641,8 @@ function SettingsPageContent() {
               </div>
               <div className="info-field">
                 <div className="info-label">Email</div>
-                <input className="input" type="email" value={agency.email} disabled={!agencyEditing}
-                  onChange={e => setAgency(a => ({ ...a, email: e.target.value }))} />
+                <input className="input" type="email" value={agency.email} disabled aria-label="Registered agency email" aria-describedby="agency-email-help" />
+                <span id="agency-email-help" className={settingsStyles.fieldHint}>Registered login email. Contact Super Admin to request a change.</span>
               </div>
             </div>
             <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
@@ -990,6 +712,7 @@ function SettingsPageContent() {
       {/* ══ BILLING ════════════════════════════════════════════════════════ */}
       {tab === 'billing' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <ServiceRatesSettings key={user?.agency_id ?? 'no-agency'} />
           <div className="form-section-card">
             <div className="form-section-heading">Provider Billing Identity</div>
             <div className="form-section-sub">NPI, taxonomy codes, and payer identifiers used for claim submission.</div>
@@ -1168,270 +891,8 @@ function SettingsPageContent() {
       )}
 
       {/* ══ PAY GROUP ══════════════════════════════════════════════════════ */}
-      {tab === 'payroll' && (
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
-            <div className="form-section-card" style={{ display: 'grid', gap: 16, minWidth: 0, maxWidth: 360 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                <div>
-                  <div className="form-section-heading">Payroll Provider</div>
-                  <div className="form-section-sub">Select the payroll system your agency uses. This determines the export column layout when downloading timesheets.</div>
-                </div>
-                {editingPayrollProvider ? (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    <button className="btn secondary" style={payrollActionButtonStyle} onClick={cancelPayrollProviderEdit}>Cancel</button>
-                    <button className="btn" style={payrollActionButtonStyle} onClick={savePayrollProvider}>Save</button>
-                  </div>
-                ) : (
-                  <button className="btn secondary" onClick={startPayrollProviderEdit}>Edit</button>
-                )}
-              </div>
+      {tab === 'payroll' && <PayrollSettingsPanel key={user?.agency_id ?? 'no-agency'} />}
 
-              {editingPayrollProvider ? (
-                <div className="info-field">
-                  <div className="info-label">Provider</div>
-                  <select className="input" value={payrollProvider} onChange={e => setPayrollProvider(e.target.value as ProviderId)}>
-                    {getAllProviders().map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
-                  </select>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>{currentPayrollProvider.description}</div>
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gap: 12 }}>
-                  <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: '14px 16px', background: '#fbfcfe' }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Current Provider</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{currentPayrollProvider.name}</div>
-                    <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--muted)', marginTop: 6 }}>{currentPayrollProvider.description}</div>
-                  </div>
-                </div>
-              )}
-
-              {payrollProviderSaved && (
-                <SuccessBanner msg={`Saved. Exports will use ${currentPayrollProvider.name} format.`} />
-              )}
-            </div>
-
-            <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-              <div className="form-section-card" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                  <div>
-                    <div className="form-section-heading">Pay Groups</div>
-                    <div className="form-section-sub">Configure caregiver pay groups and rate rules. Caregiver payroll settings and timesheet pay rates pull from these items.</div>
-                  </div>
-                  {payrollLoading ? null : editingPayGroups ? (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <button className="btn secondary" style={payrollActionButtonStyle} onClick={cancelPayGroupsEdit}>Cancel</button>
-                      <button className="btn" style={payrollActionButtonStyle} onClick={handleSavePayrollGroups} disabled={payrollSaving || payrollLoading}>
-                        {payrollSaving ? 'Saving…' : 'Save'}
-                      </button>
-                    </div>
-                  ) : (
-                    <button className="btn secondary" onClick={startPayGroupsEdit} disabled={editingPayPeriod}>Edit</button>
-                  )}
-                </div>
-
-                {payrollLoading ? (
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading payroll groups...</div>
-                ) : editingPayGroups ? (
-                  <div style={{ display: 'grid', gap: 16 }}>
-                    {payGroups.map((group, groupIndex) => (
-                      <div key={group.id ?? `group-${groupIndex}`} style={{ border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden', background: '#fff' }}>
-                        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line-soft)', display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) minmax(0, 1fr) auto', gap: 12, alignItems: 'center' }}>
-                          <input className="input" value={group.name} onChange={(event) => updatePayGroup(groupIndex, { name: event.target.value })} placeholder="Pay group name" />
-                          <input className="input" value={group.description ?? ''} onChange={(event) => updatePayGroup(groupIndex, { description: event.target.value })} placeholder="Optional description" />
-                          <button className="btn secondary" onClick={() => removePayGroup(groupIndex)} disabled={payGroups.length === 1}>Remove Group</button>
-                        </div>
-                        <div style={{ overflowX: 'auto' }}>
-                          <div style={{ minWidth: 900 }}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 0.9fr 0.9fr 1.3fr 1fr auto', gap: 12, padding: '12px 16px', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em', background: '#f8fafc', borderBottom: '1px solid var(--line-soft)' }}>
-                              <div>Name</div><div>Pay Type</div><div>Rate</div><div>When does this apply?</div><div>Effective Date</div><div />
-                            </div>
-                            {group.items.map((item, itemIndex) => (
-                              <div key={item.id ?? `item-${groupIndex}-${itemIndex}`} style={{ display: 'grid', gridTemplateColumns: '1.5fr 0.9fr 0.9fr 1.3fr 1fr auto', gap: 12, padding: '12px 16px', alignItems: 'start', borderBottom: '1px solid var(--line-soft)' }}>
-                                <div>
-                                  <input className="input" value={item.name} onChange={(event) => updatePayItem(groupIndex, itemIndex, { name: event.target.value })} placeholder="Base rate" />
-                                  {item.is_base_rate && (
-                                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 6, fontSize: 11, color: 'var(--muted)' }}>
-                                      <span style={{ width: 16, height: 16, borderRadius: '50%', background: 'var(--text)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>i</span>
-                                      <span>The base rate is the default pay rate for this group, applying 24/7 unless another pay item is triggered.</span>
-                                    </div>
-                                  )}
-                                </div>
-                                <select className="input" value={item.pay_type} onChange={(event) => updatePayItem(groupIndex, itemIndex, { pay_type: event.target.value as PayrollRateItem['pay_type'] })}>
-                                  {PAY_TYPE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                                </select>
-                                <div style={{ position: 'relative' }}>
-                                  <span style={{ position: 'absolute', left: 12, top: 11, color: 'var(--muted)', fontSize: 13 }}>$</span>
-                                  <input className="input" type="number" min="0" step="0.01" value={item.rate} onChange={(event) => updatePayItem(groupIndex, itemIndex, { rate: Number(event.target.value) })} style={{ paddingLeft: 24 }} />
-                                </div>
-                                <input className="input" value={item.applies_on ?? ''} onChange={(event) => updatePayItem(groupIndex, itemIndex, { applies_on: event.target.value })} placeholder="Weekdays / Saturday / Public Holidays" />
-                                <input className="input" type="date" value={item.effective_date ?? ''} onChange={(event) => updatePayItem(groupIndex, itemIndex, { effective_date: event.target.value })} />
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8 }}>
-                                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }}>
-                                    <input type="radio" name={`base-rate-${groupIndex}`} checked={item.is_base_rate} onChange={() => updatePayItem(groupIndex, itemIndex, { is_base_rate: true })} />
-                                    Base
-                                  </label>
-                                  <button className="btn secondary" style={{ padding: '0 10px', height: 34 }} onClick={() => removePayItem(groupIndex, itemIndex)} disabled={group.items.length === 1}>Delete</button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                          <button className="btn secondary" onClick={() => addPayItem(groupIndex)}>Add Pay Item</button>
-                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{group.items.length} pay item{group.items.length === 1 ? '' : 's'}</div>
-                        </div>
-                      </div>
-                    ))}
-                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <button className="btn secondary" onClick={addPayGroup}>Add Pay Group</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'grid', gap: 14 }}>
-                    {payGroups.map((group, groupIndex) => (
-                      <div key={group.id ?? `group-view-${groupIndex}`} style={{ border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden', background: '#fbfcfe' }}>
-                        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                          <div>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{group.name}</div>
-                            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{group.description?.trim() || 'No description added.'}</div>
-                          </div>
-                          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--muted)' }}>
-                            {group.items.length} item{group.items.length === 1 ? '' : 's'}
-                          </div>
-                        </div>
-                        <div style={{ display: 'grid', gap: 10, padding: '14px 16px' }}>
-                          {group.items.map((item, itemIndex) => (
-                            <div key={item.id ?? `group-item-view-${groupIndex}-${itemIndex}`} style={{ border: '1px solid var(--line-soft)', borderRadius: 10, padding: '12px 14px', background: '#fff' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-                                <div>
-                                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{item.name}</div>
-                                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{describePayrollItem(item)}</div>
-                                </div>
-                                {item.is_base_rate && (
-                                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', padding: '4px 8px', borderRadius: 999, color: '#35693c', background: '#e8f5e9', border: '1px solid #cfe5d2' }}>
-                                    Base rate
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="form-section-card" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                  <div>
-                    <div className="form-section-heading">Pay Period</div>
-                    <div className="form-section-sub">Set how payroll cycles are grouped. Weekly schedules use a week start, bi-weekly schedules also need the first cycle start date, and monthly options support fixed close days.</div>
-                  </div>
-                  {payrollLoading ? null : editingPayPeriod ? (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <button className="btn secondary" style={payrollActionButtonStyle} onClick={cancelPayPeriodEdit}>Cancel</button>
-                      <button className="btn" style={payrollActionButtonStyle} onClick={handleSavePayPeriod} disabled={payrollSaving || payrollLoading}>
-                        {payrollSaving ? 'Saving…' : 'Save'}
-                      </button>
-                    </div>
-                  ) : (
-                    <button className="btn secondary" onClick={startPayPeriodEdit} disabled={editingPayGroups}>Edit</button>
-                  )}
-                </div>
-
-                {payrollLoading ? (
-                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading pay period...</div>
-                ) : editingPayPeriod ? (
-                  <div style={{ display: 'grid', gap: 14 }}>
-                    <div className="form-row" style={{ gridTemplateColumns: 'minmax(240px, 320px) minmax(0, 1fr)' }}>
-                      <div className="info-field">
-                        <div className="info-label">Pay Period Type</div>
-                        <select className="input" value={payPeriod.frequency} onChange={(event) => setPayPeriod((current) => ({ ...current, frequency: event.target.value as PayrollPayPeriod['frequency'] }))}>
-                          {PAY_PERIOD_FREQUENCY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                        </select>
-                      </div>
-                      <div style={{ border: '1px solid var(--line-soft)', borderRadius: 10, padding: '12px 14px', background: '#fbfcfe' }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Preview</div>
-                        <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.55 }}>{summarizePayPeriod(payPeriod)}</div>
-                      </div>
-                    </div>
-
-                    {(payPeriod.frequency === 'weekly' || payPeriod.frequency === 'biweekly') && (
-                      <div className="form-row" style={{ gridTemplateColumns: payPeriod.frequency === 'biweekly' ? '1fr 1fr' : '1fr' }}>
-                        <div className="info-field">
-                          <div className="info-label">Week Starts On</div>
-                          <select className="input" value={payPeriod.week_starts_on ?? 'monday'} onChange={(event) => setPayPeriod((current) => ({ ...current, week_starts_on: event.target.value as WeekStartDay }))}>
-                            {WEEK_START_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                          </select>
-                        </div>
-                        {payPeriod.frequency === 'biweekly' && (
-                          <div className="info-field">
-                            <div className="info-label">First Period Start Date</div>
-                            <input className="input" type="date" value={payPeriod.anchor_date ?? ''} onChange={(event) => setPayPeriod((current) => ({ ...current, anchor_date: event.target.value }))} />
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {payPeriod.frequency === 'monthly' && (
-                      <div className="form-row" style={{ gridTemplateColumns: 'minmax(240px, 320px) minmax(0, 1fr)' }}>
-                        <div className="info-field">
-                          <div className="info-label">Close Day of Month</div>
-                          <select className="input" value={String(payPeriod.monthly_day ?? 1)} onChange={(event) => setPayPeriod((current) => ({ ...current, monthly_day: Number(event.target.value) }))}>
-                            {MONTH_DAY_OPTIONS.map((day) => <option key={day} value={day}>{formatOrdinalDay(day)}</option>)}
-                          </select>
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, paddingTop: 26 }}>
-                          If you choose the 29th, 30th, or 31st, shorter months should be treated as closing on the last calendar day.
-                        </div>
-                      </div>
-                    )}
-
-                    {payPeriod.frequency === 'semimonthly' && (
-                      <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                        <div className="info-field">
-                          <div className="info-label">First Close Day</div>
-                          <select className="input" value={String(payPeriod.semi_monthly_days[0] ?? 1)} onChange={(event) => updateSemiMonthlyDay(0, Number(event.target.value))}>
-                            {MONTH_DAY_OPTIONS.map((day) => <option key={`semi-first-${day}`} value={day}>{formatOrdinalDay(day)}</option>)}
-                          </select>
-                        </div>
-                        <div className="info-field">
-                          <div className="info-label">Second Close Day</div>
-                          <select className="input" value={String(payPeriod.semi_monthly_days[1] ?? 15)} onChange={(event) => updateSemiMonthlyDay(1, Number(event.target.value))}>
-                            {MONTH_DAY_OPTIONS.map((day) => <option key={`semi-second-${day}`} value={day}>{formatOrdinalDay(day)}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    {payPeriod.frequency === 'daily' && (
-                      <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
-                        Daily payroll closes each calendar day. No additional setup is required.
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ display: 'grid', gap: 12 }}>
-                    <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: '14px 16px', background: '#fbfcfe' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>Current Schedule</div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
-                        {PAY_PERIOD_FREQUENCY_OPTIONS.find((option) => option.value === payPeriod.frequency)?.label ?? 'Weekly'}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, lineHeight: 1.55 }}>{summarizePayPeriod(payPeriod)}</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {payrollErr && <ErrorBanner msg={payrollErr} />}
-              {payrollMsg && <SuccessBanner msg={payrollMsg} />}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══ INTEGRATIONS ═══════════════════════════════════════════════════ */}
       {tab === 'integrations' && (
         <div ref={aggregatorRef}>
           {/* Page header */}

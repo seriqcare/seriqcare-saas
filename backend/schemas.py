@@ -328,6 +328,8 @@ class VisitStats(BaseModel):
 
 
 class VisitEntry(BaseModel):
+    edit_locked: bool = False
+    sandata_submission_count: int = 0
     id: int
     employee_name: str
     employee_code: str
@@ -461,6 +463,7 @@ class PayrollGroup(BaseModel):
     name: str
     description: Optional[str] = None
     items: list[PayrollRateItem] = []
+    caregiver_count: int = 0
 
 
 class PayrollPayPeriod(BaseModel):
@@ -474,6 +477,8 @@ class PayrollPayPeriod(BaseModel):
 class PayrollSettingsResponse(BaseModel):
     groups: list[PayrollGroup]
     pay_period: PayrollPayPeriod
+    current_period_start: Optional[str] = None
+    current_period_end: Optional[str] = None
 
 
 class PayrollSettingsUpdateRequest(BaseModel):
@@ -678,6 +683,7 @@ class AggregatorQueueResponse(BaseModel):
 
 
 class SubmissionRecord(BaseModel):
+    can_retry: bool = False
     id: int
     visit_id: int
     aggregator: Optional[str] = None
@@ -872,6 +878,7 @@ class BillingEntry(BaseModel):
 
 
 class BillingStats(BaseModel):
+    missing_rate_visits: int = 0
     total_visits: int
     total_units: float
     total_estimated_amount: float

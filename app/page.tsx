@@ -4,6 +4,7 @@ import { DashboardEvvPanels } from '@/components/dashboard-evv-panels';
 import { getCaregiverUtilization, getDashboardAuthorizations, getDashboardMetrics } from '@/lib/queries/dashboard';
 import styles from './dashboard.module.css';
 import { LiveVisitRefresh } from '@/components/live-visit-refresh';
+import fitted from '@/components/fitted-page.module.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,7 @@ export default async function DashboardPage() {
   const maxCount = Math.max(...m.visitsByDay.map((d) => d.count), 1);
 
   return (
-    <ProtectedLayout>
+    <ProtectedLayout className={`${fitted.shell} ${styles.dashboard}`}>
       <LiveVisitRefresh />
       {/* ── Topbar ─────────────────────────────────── */}
       <div className="topbar overview-topbar">
@@ -75,7 +76,7 @@ export default async function DashboardPage() {
 
       {/* ── Row 2 — Activity chart + Priority queue ── */}
       <div className={styles.panels}>
-        <div className="card">
+        <div className={`card ${styles.activity}`}>
           <div className="card-header">
             <div>
               <div className="card-title">Visit Activity — Last 14 Days</div>
@@ -210,8 +211,8 @@ export default async function DashboardPage() {
           </div>
           )}
         </div>
+        <DashboardEvvPanels metrics={m} embedded />
       </div>
-      <DashboardEvvPanels metrics={m} />
     </ProtectedLayout>
   );
 }

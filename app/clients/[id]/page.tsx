@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { getClients, getClientOverview } from '@/lib/queries/clients';
 import { ClientTabs } from '@/components/client-tabs';
+import fitted from '@/components/fitted-page.module.css';
+import styles from './client-detail.module.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,7 +50,7 @@ export default async function ClientDetailPage({
   }
 
   return (
-    <ProtectedLayout>
+    <ProtectedLayout className={fitted.shell}>
       {/* ── Breadcrumb topbar ────────────────────────── */}
       <div className="topbar" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--muted)' }}>
@@ -67,24 +69,24 @@ export default async function ClientDetailPage({
       </div>
 
       {/* ── Tab card ─────────────────────────────────── */}
-      <div className="card" style={{ padding: '18px 20px' }}>
+      <div className={`card ${styles.card}`}>
         {/* At a Glance strip */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20, paddingBottom: 18, borderBottom: '1px solid var(--line-soft)' }}>
+        <div className={styles.stats}>
           {[
             { label: 'Next Visit',    value: client.next_visit ? client.next_visit.split(' ')[0] : '—' },
             { label: 'Total Visits',  value: overview?.total_visits ?? 'Unavailable' },
-            { label: 'Care Plan',     value: client.care_plan_status, flag: client.care_plan_status === 'Overdue' },
-            { label: 'Active Auths',  value: overview?.active_authorizations ?? 'Unavailable' },
+            { label: 'Total Hours',   value: overview ? overview.total_hours.toFixed(1) : 'Unavailable' },
+            { label: 'EVV Exceptions', value: overview?.evv_exceptions ?? 'Unavailable', flag: (overview?.evv_exceptions ?? 0) > 0 },
           ].map(({ label, value, flag }) => (
-            <div key={label} style={{ textAlign: 'center', padding: '12px 10px', border: '1px solid var(--line-soft)', borderRadius: 8, background: 'var(--surface-soft)' }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: flag ? '#d56b6b' : 'var(--text)', marginBottom: 4 }}>{value}</div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</div>
+            <div key={label} className={styles.stat}>
+              <div className={styles.value} style={{ color: flag ? '#d56b6b' : 'var(--text)' }}>{value}</div>
+              <div className={styles.label}>{label}</div>
             </div>
           ))}
         </div>
 
         {/* Client name + status header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <div className={styles.identity}>
           <div style={{
             width: 40, height: 40, borderRadius: '50%',
             background: 'linear-gradient(135deg,#d7e8f6,#2567a4)',

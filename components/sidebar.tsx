@@ -2,7 +2,8 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useRef } from 'react';
 import { useAuth } from './auth-context';
 
 interface NavLink {
@@ -174,6 +175,13 @@ const SUPER_ADMIN_NAV: NavGroup[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const warmed = useRef<Record<string, number>>({});
+  function warm(href: string) {
+    if (href === pathname || Date.now() - (warmed.current[href] || 0) < 30000) return;
+    warmed.current[href] = Date.now();
+    router.prefetch(href);
+  }
   const { user, signOut } = useAuth();
 
   const nav = user?.role === 'super_admin' ? SUPER_ADMIN_NAV : buildAgencyNav(user?.agency_tier);
@@ -195,6 +203,8 @@ export function Sidebar() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  onMouseEnter={() => warm(link.href)}
+                  onFocus={() => warm(link.href)}
                   className={`nav-link${isActive ? ' active' : ''}`}
                 >
                   {link.icon}

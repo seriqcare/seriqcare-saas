@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
 from pydantic import ValidationError
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user
@@ -110,6 +110,26 @@ class AgencyAuthTests(unittest.TestCase):
         session.user_id = 20
         self.db.commit()
         with self.assertRaises(HTTPException): self.authenticate(response.access_token)
+
+    def test_authentication_and_scope_use_two_queries_without_cross_request_caching(self):
+        from backend.auth.dependencies import AgencyScope
+        response = self.login()
+        selects = []
+        def record_query(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith('SELECT'):
+                selects.append(statement)
+        event.listen(self.engine, 'before_cursor_execute', record_query)
+        try:
+            owner = self.authenticate(response.access_token)
+            scope = AgencyScope(owner, self.db)
+        finally:
+            event.remove(self.engine, 'before_cursor_execute', record_query)
+        self.assertEqual(len(selects), 2)
+        self.assertEqual(scope.agency_tier, 'core')
+        self.db.get(Agency, 1).is_active = False
+        self.db.commit()
+        with self.assertRaises(HTTPException):
+            self.authenticate(response.access_token)
 
     def test_agency_changes_invalidate_access_and_refresh_sessions(self):
         response = self.login()

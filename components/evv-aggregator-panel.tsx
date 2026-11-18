@@ -176,6 +176,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
   useEffect(() => { setTab(initialTab); }, [initialTab]);
 
   const historyPages = Math.max(1, Math.ceil(historyTotal / 50));
+  const lockedVisits = new Set(history.filter(record => ['Accepted', 'Submitted', 'Pending'].includes(record.status)).map(record => record.visit_id));
   const historyHref = (page: number) => `/evv?${new URLSearchParams({ aggregator, tab: 'history', history_page: String(page) })}`;
 
   const isHhax = aggregator === 'hhax';
@@ -387,7 +388,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
                       </td>
                       <td style={{ fontSize: 11 }}>{rec.submitted_at ?? '—'}</td>
                       <td>
-                        {(rec.status === 'Rejected' || rec.status === 'Error') && rec.aggregator !== 'hhax' && (
+                        {['Rejected', 'Error', 'Failed'].includes(rec.status) && rec.aggregator === 'sandata' && rec.can_retry !== false && !lockedVisits.has(rec.visit_id) && (
                           <RetryBtn id={rec.id} onDone={(r) => {
                             if (r.success) setHistory(h => h.map(x => x.id === rec.id ? { ...x, status: 'Accepted' } : x));
                           }} />

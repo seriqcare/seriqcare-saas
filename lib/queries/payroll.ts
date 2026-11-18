@@ -22,6 +22,7 @@ export interface PayrollGroup {
   name: string;
   description?: string | null;
   items: PayrollRateItem[];
+  caregiver_count?: number;
 }
 
 export type PayPeriodFrequency = 'daily' | 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
@@ -36,6 +37,8 @@ export interface PayrollPayPeriod {
 }
 
 export interface PayrollSettingsResponse {
+  current_period_start?: string | null;
+  current_period_end?: string | null;
   groups: PayrollGroup[];
   pay_period: PayrollPayPeriod;
 }

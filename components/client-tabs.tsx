@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { ClientCareTask, ClientCareTaskInput, ClientDetail, ClientSummary, ClientVisitItem } from '@/lib/queries/clients';
 import { useAuth } from '@/components/auth-context';
 import { ClientRecordEditor } from '@/components/client-record-editor';
 import recordStyles from '@/components/client-record-editor.module.css';
+import { ClientTabRevisionProvider, notifyClientDataChanged, useClientTabRevision } from '@/components/client-tab-refresh';
 import { getClientDetail, getClientVisits, updateClient } from '@/lib/queries/clients';
 
 /* ── Helpers ─────────────────────────────────────────── */
@@ -171,6 +172,15 @@ function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
   const [editing, setEditing] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (Object.values(editing).some(Boolean)) return;
+    setVals(current => ({ ...current,
+      name: c.name ?? '', client_code: c.client_code ?? '', age: c.age != null ? String(c.age) : '',
+      service_type: c.service_type ?? '', caregiver: c.primary_caregiver ?? '',
+      next_visit: c.next_visit ?? '', account_status: c.status ?? '', care_plan_status: c.care_plan_status ?? '',
+    }));
+  }, [c]);
+
   function set(k: string, v: string) { setVals((p) => ({ ...p, [k]: v })); }
   function startEdit(section: string) { setEditing((p) => ({ ...p, [section]: true })); }
 
@@ -256,6 +266,7 @@ function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
 
 /* ── Tab: Address & Personal ──────────────────────────── */
 function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
+  const revision = useClientTabRevision();
   const router = useRouter();
   const { user, apiFetch } = useAuth();
   const [detail, setDetail] = useState<ClientDetail | null>(null);
@@ -263,7 +274,7 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
   const [editing, setEditing] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (!user?.token) return;
+    if (!user?.token || Object.values(editing).some(Boolean)) return;
     setDetailError('');
     getClientDetail(clientId, user.token)
       .then((data) => {
@@ -276,7 +287,7 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
       .catch(() => {
         setDetailError('Could not load client details. Please refresh or try again shortly.');
       });
-  }, [clientId, user?.token]);
+  }, [clientId, user?.token, revision]);
 
   const vals = detail ? {
     street:      detail.street_address ?? '',
@@ -423,6 +434,7 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
 
 /* ── Tab: Insurance ───────────────────────────────────── */
 function CarePlanTabInner({ clientId }: { clientId: number }) {
+  const revision = useClientTabRevision();
   const { user, apiFetch } = useAuth();
   const [detail, setDetail] = useState<ClientDetail | null>(null);
   const [vals, setVals] = useState<Record<string, string>>({
@@ -440,7 +452,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
   const [carePlanError, setCarePlanError] = useState('');
 
   useEffect(() => {
-    if (!user?.token) return;
+    if (!user?.token || Object.values(editing).some(Boolean) || editingTaskId !== null) return;
     getClientDetail(clientId, user.token)
       .then((d) => {
         if (!d) return;
@@ -455,7 +467,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
         });
       })
       .catch(() => {});
-  }, [clientId, user?.token]);
+  }, [clientId, user?.token, revision]);
 
   function set(k: string, v: string) { setVals((p) => ({ ...p, [k]: v })); }
   function startEdit(s: string) { setCarePlanError(''); setEditing((p) => ({ ...p, [s]: true })); }
@@ -484,7 +496,6 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
 
   useEffect(() => {
     let alive = true;
-    setTasksLoading(true);
     setTasksError('');
     apiFetch(`/api/clients/${clientId}/care-tasks`)
       .then(async (res) => {
@@ -503,7 +514,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
     return () => {
       alive = false;
     };
-  }, [clientId]);
+  }, [clientId, revision]);
 
   function startTaskEdit(task: ClientCareTask) {
     setTasksError('');
@@ -571,6 +582,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? 'Failed to save care tasks.');
       const response = await res.json();
       setCareTasks(response.items);
+      notifyClientDataChanged(clientId);
       setEditingTaskId(null);
       setTaskDraft(null);
     } catch (error: unknown) {
@@ -599,6 +611,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? 'Failed to remove care task.');
       const response = await res.json();
       setCareTasks(response.items);
+      notifyClientDataChanged(clientId);
       if (editingTaskId === taskId) {
         setEditingTaskId(null);
         setTaskDraft(null);
@@ -750,6 +763,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
 }
 
 function VisitsTab({ clientId }: { clientId: number }) {
+  const revision = useClientTabRevision();
   const { user } = useAuth();
   const [visits, setVisits] = useState<ClientVisitItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -760,14 +774,11 @@ function VisitsTab({ clientId }: { clientId: number }) {
       .then(setVisits)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [clientId, user?.token]);
+  }, [clientId, user?.token, revision]);
 
   if (loading) {
     return <div style={{ padding: '20px 0', fontSize: 12, color: 'var(--muted)' }}>Loading visit history…</div>;
   }
-
-  const totalHours = visits.reduce((s, v) => s + v.total_hours, 0);
-  const evvExceptions = visits.filter((v) => v.evv_status && ['Pending', 'Failed', 'Incomplete'].includes(v.evv_status)).length;
 
   return (
     <div>
@@ -806,22 +817,6 @@ function VisitsTab({ clientId }: { clientId: number }) {
         )}
       </div>
 
-      <div className="detail-section">
-        <div className="detail-section-title">Visit Statistics</div>
-        <div className="detail-grid col4">
-          {[
-            ['Total Visits',       String(visits.length)],
-            ['Total Hours',        totalHours.toFixed(1)],
-            ['EVV Exceptions',     String(evvExceptions)],
-            ['Approved Visits',    String(visits.filter((v) => v.approval_status === 'Approved').length)],
-          ].map(([label, value]) => (
-            <div key={label} style={{ padding: '14px 16px', border: '1px solid var(--line)', borderRadius: 6, background: '#fff', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 3 }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -866,6 +861,7 @@ interface DocSubmission {
 }
 
 function DocumentsTab({ clientId }: { clientId: number }) {
+  const revision = useClientTabRevision();
   const { apiFetch } = useAuth();
   const [docs, setDocs] = useState<DocSubmission[]>([]);
   const [total, setTotal] = useState(0);
@@ -873,7 +869,6 @@ function DocumentsTab({ clientId }: { clientId: number }) {
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
     apiFetch(`/api/documentation/submissions?patient_id=${clientId}&take=50`)
       .then((res) => res.ok ? res.json() : { total: 0, items: [] })
       .then((data) => {
@@ -885,7 +880,7 @@ function DocumentsTab({ clientId }: { clientId: number }) {
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId]);
+  }, [clientId, revision]);
 
   return (
     <div>
@@ -965,33 +960,81 @@ const TABS = [
 ];
 
 export function ClientTabs({ client, clientId }: { client: ClientSummary; clientId: number }) {
+  const { user } = useAuth();
+  return <ClientTabsWorkspace key={`${user?.agency_id}:${user?.username}:${user?.role}:${clientId}`} client={client} clientId={clientId} />;
+}
+
+function ClientTabsWorkspace({ client, clientId }: { client: ClientSummary; clientId: number }) {
   const [active, setActive] = useState('profile');
+  const [visited, setVisited] = useState(['profile']);
+  const [versions, setVersions] = useState<Record<string, number>>({});
+  const refreshed = useRef<Record<string, number>>({ profile: Date.now() });
+
+  function warm(id: string) {
+    if (!(id in refreshed.current)) {
+      refreshed.current[id] = Date.now();
+      setVisited(current => current.includes(id) ? current : [...current, id]);
+    }
+  }
+  function refresh(id: string, force = false) {
+    if (document.visibilityState !== 'visible') return;
+    const panel = document.getElementById(`client-panel-${id}`);
+    if (panel?.querySelector('input:not([readonly]), select, textarea:not([readonly])')) return;
+    if (!force && Date.now() - (refreshed.current[id] || 0) < 30000) return;
+    refreshed.current[id] = Date.now();
+    setVersions(current => ({ ...current, [id]: (current[id] || 0) + 1 }));
+  }
+  useEffect(() => {
+    const update = (event: Event) => {
+      if ((event as CustomEvent).detail?.clientId !== clientId) return;
+      Object.keys(refreshed.current).forEach(id => { refreshed.current[id] = 0; });
+      refresh(active, true);
+    };
+    const foreground = () => refresh(active);
+    const interval = window.setInterval(foreground, 30000);
+    window.addEventListener('focus', foreground);
+    document.addEventListener('visibilitychange', foreground);
+    window.addEventListener('client-data-changed', update);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', foreground);
+      document.removeEventListener('visibilitychange', foreground);
+      window.removeEventListener('client-data-changed', update);
+    };
+  }, [active, clientId]);
+
+  const panels: Record<string, React.ReactNode> = {
+    profile: <ProfileTab c={client} clientId={clientId} />,
+    address: <AddressTab c={client} clientId={clientId} />,
+    careplan: <CarePlanTabInner clientId={clientId} />,
+    goals: <ClientRecordEditor clientId={clientId} kind="goals" />,
+    insurance: <ClientRecordEditor clientId={clientId} kind="insurance" />,
+    auths: <ClientRecordEditor clientId={clientId} kind="authorizations" />,
+    visits: <VisitsTab clientId={clientId} />,
+    billing: <BillingTab />,
+    documents: <DocumentsTab clientId={clientId} />,
+  };
 
   return (
     <>
-      <div className="tab-bar">
+      <div className="tab-bar" role="tablist" aria-label="Client details">
         {TABS.map((t) => (
           <button
             key={t.id}
             className={`tab-btn${active === t.id ? ' active' : ''}`}
-            onClick={() => setActive(t.id)}
+            role="tab" id={`client-tab-${t.id}`} aria-selected={active === t.id} aria-controls={`client-panel-${t.id}`}
+            onMouseEnter={() => warm(t.id)}
+            onFocus={() => warm(t.id)}
+            onClick={() => { warm(t.id); setActive(t.id); refresh(t.id); }}
           >
             {t.label}
           </button>
         ))}
       </div>
 
-      <div>
-        {active === 'profile'   && <ProfileTab c={client} clientId={clientId} />}
-        {active === 'address'   && <AddressTab c={client} clientId={clientId} />}
-        {active === 'careplan'  && <CarePlanTabInner clientId={clientId} />}
-        {active === 'goals'     && <ClientRecordEditor clientId={clientId} kind="goals" />}
-        {active === 'insurance' && <ClientRecordEditor clientId={clientId} kind="insurance" />}
-        {active === 'auths'     && <ClientRecordEditor clientId={clientId} kind="authorizations" />}
-        {active === 'visits'    && <VisitsTab clientId={clientId} />}
-        {active === 'billing'   && <BillingTab />}
-        {active === 'documents' && <DocumentsTab clientId={clientId} />}
-      </div>
+      {visited.map(id => <div key={id} id={`client-panel-${id}`} role="tabpanel" aria-labelledby={`client-tab-${id}`} hidden={active !== id}>
+        <ClientTabRevisionProvider value={versions[id] || 0}>{panels[id]}</ClientTabRevisionProvider>
+      </div>)}
     </>
   );
 }

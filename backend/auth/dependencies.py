@@ -93,27 +93,21 @@ def get_current_user(
     if not jti:
         raise exc
 
-    session = _run_with_transient_retry(
+    identity = _run_with_transient_retry(
         db,
-        lambda: db.query(UserSession).filter(UserSession.jti == jti).first(),
+        lambda: db.query(UserSession, User).join(User, User.id == UserSession.user_id).filter(
+            UserSession.jti == jti, User.id == payload.get('user_id'),
+            User.username == payload.get('sub'), User.is_active == True,
+        ).first(),
     )
+    if not identity:
+        raise exc
+    session, user = identity
     if not session or session.revoked_at is not None:
         raise exc
 
     # Compare as naive datetimes (DB stores UTC without tz info)
     if session.expires_at < datetime.utcnow():
-        raise exc
-
-    username: str | None = payload.get("sub")
-    user = _run_with_transient_retry(
-        db,
-        lambda: (
-            db.query(User)
-            .filter(User.id == payload.get('user_id'), User.username == username, User.is_active == True)
-            .first()
-        ),
-    )
-    if not user:
         raise exc
 
     if (session.user_id != user.id or payload.get('user_id') != user.id
@@ -126,6 +120,9 @@ def get_current_user(
         raise exc
     if user.role == 'super_admin' and payload.get('agency_code') != PLATFORM_LOGIN_CODE:
         raise exc
+    # Reuse only within this request's ORM session; never cache authorization
+    # decisions across requests or skip current membership verification.
+    user._request_verified_agency = (user.agency_id, agency)
 
     return user
 
@@ -170,7 +167,10 @@ class AgencyScope:
         self.agency_id: Optional[int] = None if user.role == "super_admin" else user.agency_id
         # Resolve agency tier so endpoints can gate aggregator calls
         self.agency_tier: Optional[str] = None
-        if self.agency_id is not None and db is not None:
+        verified = getattr(user, '_request_verified_agency', None)
+        if verified and verified[0] == self.agency_id and verified[1] is not None:
+            self.agency_tier = verified[1].tier
+        elif self.agency_id is not None and db is not None:
             try:
                 row = db.execute(
                     text("SELECT tier FROM care.agencies WHERE id = :id"),

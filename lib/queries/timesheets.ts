@@ -10,6 +10,8 @@ export interface VisitStats {
 }
 
 export interface VisitEntry {
+  edit_locked?: boolean;
+  sandata_submission_count?: number;
   id: number;
   employee_name: string;
   employee_code: string;

@@ -62,6 +62,16 @@ test('history pagination preserves the aggregator and history tab', () => {
   assert.match(text(last), /Showing 51–51 of 51 submissions/);
 });
 
+test('older rejected attempts cannot be retried after the visit was accepted', () => {
+  const rejected = { id: 1, visit_id: 10, status: 'Rejected', aggregator: 'sandata', can_retry: true };
+  const tree = render({ historyTotal: 2, initialHistory: [rejected, { id: 2, visit_id: 10, status: 'Accepted', aggregator: 'sandata' }] });
+  assert.ok(!nodes(tree).some(node => node.type?.name === 'RetryBtn'));
+  const unlocked = render({ historyTotal: 1, initialHistory: [rejected] });
+  assert.ok(nodes(unlocked).some(node => node.type?.name === 'RetryBtn'));
+  const lockedByServer = render({ historyTotal: 1, initialHistory: [{ ...rejected, can_retry: false }] });
+  assert.ok(!nodes(lockedByServer).some(node => node.type?.name === 'RetryBtn'));
+});
+
 async function renderPage(fail = false) {
   const mod = { exports: {} }, jsx = (type, props) => ({ type, props });
   const source = ts.transpileModule(fs.readFileSync('app/evv/page.tsx', 'utf8'), {

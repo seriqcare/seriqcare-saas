@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db.database import get_db
+from backend.services.billing_rates import RATE_JOIN
 from backend.auth.dependencies import get_agency_scope, AgencyScope
 from backend.services.timezone import SQLSERVER_EASTERN_NOW_EXPR
 from backend.schemas import (
@@ -78,11 +79,12 @@ def _period_bounds(period: str) -> tuple[date, date]:
 # OUTER APPLY TOP 1 on billing_claim_visits prevents row fan-out when a visit
 # belongs to more than one claim (many-to-many).  We always surface the most
 # recent claim for display purposes.
-_BASE_JOIN = """
+_BASE_JOIN = f"""
     FROM care.visits v
     JOIN  care.employees    e   ON e.id  = v.employee_id
     JOIN  care.clients      c   ON c.id  = v.client_id
     JOIN  care.service_codes sc ON sc.id = v.service_code_id
+    {RATE_JOIN}
     LEFT JOIN care.visit_evv                ev  ON ev.visit_id  = v.id
     LEFT JOIN care.visit_billing            vb  ON vb.visit_id  = v.id
     LEFT JOIN care.visit_integration_status vi  ON vi.visit_id  = v.id
@@ -147,6 +149,7 @@ def _base_where(
 def _stats_from_row(row) -> BillingStats:
     return BillingStats(
         total_visits=int(row.total_visits or 0),
+        missing_rate_visits=int(getattr(row, "missing_rate_visits", 0) or 0),
         total_units=round(float(row.total_units or 0), 2),
         total_estimated_amount=round(float(row.total_estimated_amount or 0), 2),
         ready_to_bill=int(row.ready_to_bill or 0),
@@ -159,10 +162,11 @@ def _stats_from_row(row) -> BillingStats:
 _STATS_SELECT = f"""
     SELECT
         COUNT(*)                                                         AS total_visits,
+        COUNT(CASE WHEN rate.rate_per_unit IS NULL THEN 1 END) AS missing_rate_visits,
         ISNULL(SUM(COALESCE(vb.approved_units, vb.billed_units, 0)), 0) AS total_units,
         ISNULL(SUM(
             COALESCE(vb.approved_units, vb.billed_units, 0) *
-            ISNULL(sc.default_rate, 0)
+            rate.rate_per_unit
         ), 0)                                                            AS total_estimated_amount,
         COUNT(CASE
             WHEN vb.approval_status = 'Approved'
@@ -250,10 +254,10 @@ def get_billing(
                     vb.approval_status,
                     vi.sandata_status,
                     vi.hhax_status,
-                    CAST(sc.default_rate AS FLOAT)                         AS default_rate,
+                    CAST(rate.rate_per_unit AS FLOAT)                         AS default_rate,
                     CAST(
                         COALESCE(vb.approved_units, vb.billed_units, 0) *
-                        ISNULL(sc.default_rate, 0)
+                        rate.rate_per_unit
                     AS FLOAT)                                              AS estimated_amount,
                     bcv.claim_id,
                     {_BILLING_STATUS}                                      AS billing_status
@@ -290,6 +294,8 @@ def get_billing(
             total=total, page=page, per_page=per_page, stats=stats, items=items
         )
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -312,6 +318,8 @@ def get_billing_stats(
             params,
         ).fetchone()
         return _stats_from_row(row)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -345,12 +353,13 @@ def generate_claim(
                     AS FLOAT) AS units,
                     CAST(
                         COALESCE(vb.approved_units, vb.billed_units, 0) *
-                        ISNULL(sc.default_rate, 0)
+                        rate.rate_per_unit
                     AS FLOAT) AS amount
                 FROM care.visits v
                 JOIN care.clients c ON c.id = v.client_id AND c.agency_id = v.agency_id
                 JOIN care.employees e ON e.id = v.employee_id AND e.agency_id = v.agency_id
                 JOIN  care.service_codes sc ON sc.id = v.service_code_id
+    {RATE_JOIN}
                 LEFT JOIN care.visit_billing vb ON vb.visit_id = v.id
                 WHERE v.id IN ({placeholders})
                   AND v.visit_cancelled = 0
@@ -361,6 +370,9 @@ def generate_claim(
 
         if not visit_rows or {int(r.id) for r in visit_rows} != set(visit_id_list):
             raise HTTPException(status_code=404, detail="No eligible visits found for provided IDs")
+
+        if any(r.amount is None for r in visit_rows):
+            raise HTTPException(422, "Set service rates in Settings > Billing > Service Rates for every visit date before generating claims.")
 
         agency_ids = {r.agency_id for r in visit_rows}
         if len(agency_ids) != 1 or None in agency_ids:
@@ -498,6 +510,8 @@ def get_auth_utilization(
             for r in rows
         ]
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -570,6 +584,8 @@ def list_claims(
 
         return BillingClaimListResponse(total=total, page=page, per_page=per_page, items=items)
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -746,10 +762,10 @@ def export_billing_entries(
                     vb.approval_status,
                     vi.sandata_status,
                     vi.hhax_status,
-                    CAST(sc.default_rate AS FLOAT)                               AS default_rate,
+                    CAST(rate.rate_per_unit AS FLOAT)                               AS default_rate,
                     CAST(
                         COALESCE(vb.approved_units, vb.billed_units, 0) *
-                        ISNULL(sc.default_rate, 0)
+                        rate.rate_per_unit
                     AS FLOAT)                                                    AS estimated_amount,
                     bcv.claim_id,
                     {_BILLING_STATUS}                                            AS billing_status
@@ -795,6 +811,8 @@ def export_billing_entries(
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -831,12 +849,13 @@ _GROUPING_QUERY = """
         CAST(COALESCE(vb.approved_units, vb.billed_units, 0) AS FLOAT)  AS units,
         CAST(
             COALESCE(vb.approved_units, vb.billed_units, 0) *
-            ISNULL(sc.default_rate, 0)
+            rate.rate_per_unit
         AS FLOAT)                                                   AS amount
     FROM care.visits v
     JOIN  care.clients       c   ON c.id = v.client_id AND c.agency_id = v.agency_id
     JOIN  care.employees     e   ON e.id = v.employee_id AND e.agency_id = v.agency_id
     JOIN  care.service_codes sc  ON sc.id = v.service_code_id
+    {RATE_JOIN}
     LEFT JOIN care.visit_evv                ev  ON ev.visit_id  = v.id
     LEFT JOIN care.visit_billing            vb  ON vb.visit_id  = v.id
     LEFT JOIN care.visit_integration_status vi  ON vi.visit_id  = v.id
@@ -860,9 +879,12 @@ def _build_groups(db: Session, period_start: date, period_end: date, scope: Agen
     Returns a list of group dicts including per-visit detail for claim insertion.
     """
     rows = db.execute(
-        text(_GROUPING_QUERY.format(agency_filter=scope.sql_filter("v"))),
+        text(_GROUPING_QUERY.format(agency_filter=scope.sql_filter("v"), RATE_JOIN=RATE_JOIN)),
         scope.bind({"period_start": period_start.isoformat(), "period_end": period_end.isoformat()}),
     ).fetchall()
+
+    if any(r.amount is None for r in rows):
+        raise HTTPException(422, "Set service rates in Settings > Billing > Service Rates for every eligible visit date before generating claims.")
 
     bucket: dict[tuple, dict] = {}
     for r in rows:
@@ -929,6 +951,8 @@ def preview_claim_groups(
             total_amount=round(sum(g["total_amount"] for g in raw), 2),
         )
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

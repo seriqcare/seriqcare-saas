@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from './auth-context';
 import { refreshClientRecords } from '@/app/clients/actions';
 import styles from './client-record-editor.module.css';
+import { notifyClientDataChanged, useClientTabRevision } from './client-tab-refresh';
 
 type Kind = 'goals' | 'insurance' | 'authorizations';
 type RecordRow = Record<string, string | number | boolean | null>;
@@ -67,6 +68,7 @@ function optionLabel(option: Option) {
 }
 
 export function ClientRecordEditor({ clientId, kind }: { clientId: number; kind: Kind }) {
+  const revision = useClientTabRevision();
   const { apiFetch } = useAuth();
   const router = useRouter();
   const [rows, setRows] = useState<RecordRow[]>([]);
@@ -92,16 +94,15 @@ export function ClientRecordEditor({ clientId, kind }: { clientId: number; kind:
   }, [apiFetch, clientId, endpoint, kind]);
 
   useEffect(() => {
-    setLoading(true);
     setError('');
     load().catch(err => setError(err.message)).finally(() => setLoading(false));
-  }, [load]);
+  }, [load, revision]);
 
   useEffect(() => {
     if (kind !== 'insurance') return;
     apiFetch(`/api/clients/${clientId}`, { cache: 'no-store' }).then(readResponse)
       .then(detail => setMedicaidId(detail.medicaid_id)).catch(() => setMedicaidId(null));
-  }, [apiFetch, clientId, kind]);
+  }, [apiFetch, clientId, kind, revision]);
 
   useEffect(() => {
     if (!notice) return;
@@ -111,7 +112,18 @@ export function ClientRecordEditor({ clientId, kind }: { clientId: number; kind:
 
   function startEdit(row?: RecordRow) {
     setError('');
-    setDraft({ ...current.defaults, ...row });
+    const next = { ...current.defaults, ...row };
+    if (kind === 'authorizations' && !next.provider_id && options.providers.length === 1) next.provider_id = options.providers[0].id;
+    setDraft(next);
+  }
+
+  async function refreshEmptyProviders() {
+    if (options.providers.length > 0) return;
+    try {
+      const choices: Options = await apiFetch(`/api/clients/${clientId}/edit-options`, { cache: 'no-store' }).then(readResponse);
+      setOptions(choices);
+      if (choices.providers.length === 1) setDraft(value => value && !value.provider_id ? { ...value, provider_id: choices.providers[0].id } : value);
+    } catch { setError('Unable to refresh providers. Please try again.'); }
   }
 
   async function save(event: React.FormEvent<HTMLFormElement>) {
@@ -141,6 +153,7 @@ export function ClientRecordEditor({ clientId, kind }: { clientId: number; kind:
       return;
     }
     setDraft(null);
+    notifyClientDataChanged(clientId);
     setNotice(`${current.singular} saved.`);
     try {
       await Promise.all([load(), refreshClientRecords(clientId)]);
@@ -176,7 +189,7 @@ export function ClientRecordEditor({ clientId, kind }: { clientId: number; kind:
         <fieldset disabled={saving} className={`detail-grid ${styles.fields}`}>
           {current.fields.map(field => <label key={field.key} className={`info-field${field.type === 'textarea' ? ` ${styles.wide}` : ''}`}>
             <span className="info-label">{field.label}{field.required ? ' *' : ''}</span>
-            {field.type === 'select' ? <select className="form-select" required={field.required} value={String(draft[field.key] ?? '')} onChange={e => setDraft({ ...draft, [field.key]: e.target.value })}>
+            {field.type === 'select' ? <select className="form-select" required={field.required} value={String(draft[field.key] ?? '')} onFocus={field.options === 'providers' ? refreshEmptyProviders : undefined} onChange={e => setDraft({ ...draft, [field.key]: e.target.value })}>
               <option value="">Select…</option>
               {field.options ? options[field.options].map(o => <option key={o.id} value={o.id}>{optionLabel(o)}</option>)
                 : field.choices?.map(choice => <option key={choice}>{choice}</option>)}

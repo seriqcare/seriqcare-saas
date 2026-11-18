@@ -44,6 +44,12 @@ def run_migrations(engine) -> None:
             "Run seriqcare_evv_ddl.sql first, then restart. "
             f"Detail: {exc}"
         )
+    try:
+        from pathlib import Path
+        with engine.begin() as conn:
+            conn.execute(text((Path(__file__).resolve().parents[2] / 'sql' / 'agency_service_rates.sql').read_text()))
+    except Exception as exc:
+        log.warning("Agency service rates migration failed: %s", exc)
     # Client goals must also be available when an older, unrelated migration fails.
     try:
         _phase7(engine)

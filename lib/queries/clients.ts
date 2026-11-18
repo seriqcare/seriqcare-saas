@@ -1,8 +1,9 @@
 import { getAuthHeaders } from './server-auth';
+import { notifyClientDataChanged } from '@/lib/client-events';
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? process.env.API_BASE_URL ?? 'http://127.0.0.1:8000';
 
-export async function getClientOverview(clientId: number): Promise<{ total_visits: number; active_authorizations: number } | null> {
+export async function getClientOverview(clientId: number): Promise<{ total_visits: number; total_hours: number; evv_exceptions: number; active_authorizations: number } | null> {
   try {
     const response = await fetch(`${API}/api/clients/${clientId}/overview`, {
       headers: await getAuthHeaders(), cache: 'no-store', signal: AbortSignal.timeout(8000),
@@ -324,6 +325,7 @@ export async function updateClient(
     const error = await res.json().catch(() => ({}));
     throw new Error(typeof error.detail === 'string' ? error.detail : `Client update failed (HTTP ${res.status})`);
   }
+  notifyClientDataChanged(id);
   return res.json();
 }
 

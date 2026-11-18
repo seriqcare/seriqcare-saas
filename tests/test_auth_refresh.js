@@ -8,7 +8,7 @@ const ts = require('typescript');
 function harness(host = 'localhost', apiBase = 'http://127.0.0.1:8000', pathname = '/clients') {
   let now = 1_000_000, context, apiStatus = 200;
   let refreshResponse = { ok: false, status: 401 };
-  const effects = [], intervals = [], redirects = [], calls = [];
+  const effects = [], intervals = [], redirects = [], calls = [], routeRefreshes = [];
   const cookies = new Map(), storage = new Map(), events = new Map();
   const document = {
     visibilityState: 'visible',
@@ -40,7 +40,7 @@ function harness(host = 'localhost', apiBase = 'http://127.0.0.1:8000', pathname
       if (name === 'react') return react;
       if (name === 'react/jsx-runtime') return { jsx: (type, props) => { context = props.value; } };
       if (name === 'next/navigation') return {
-        usePathname: () => pathname, useRouter: () => ({ replace: path => redirects.push(path) }),
+        usePathname: () => pathname, useRouter: () => ({ replace: path => redirects.push(path), refresh: () => routeRefreshes.push(true) }),
       };
       throw new Error(`Unexpected import: ${name}`);
     },
@@ -68,7 +68,7 @@ function harness(host = 'localhost', apiBase = 'http://127.0.0.1:8000', pathname
   module.exports.AuthProvider({ children: null });
   effects.forEach(fn => fn());
   return {
-    get auth() { return context; }, cookies, calls, redirects,
+    get auth() { return context; }, cookies, calls, redirects, routeRefreshes,
     refresh: value => { refreshResponse = value; }, apiStatus: value => { apiStatus = value; },
     advance: ms => { now += ms; intervals.forEach(fn => fn()); },
     event: name => events.get(name)?.(),
@@ -87,6 +87,7 @@ async function signedIn() {
   const h = harness();
   await settle();
   assert.equal((await h.auth.signIn('ACME', 'user', 'password', h.auth.apiBases[0])).ok, true);
+  assert.equal(h.routeRefreshes.length, 1, 'sign-in clears pages prefetched under a previous identity');
   h.calls.length = 0;
   return h;
 }
