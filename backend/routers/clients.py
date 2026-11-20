@@ -9,6 +9,7 @@ import logging
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from backend.services.authorization_usage import authorization_usage_join
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -37,6 +38,7 @@ from backend.schemas import (
 )
 from backend.services import sandata as _sandata_svc
 from backend.services.agency_providers import agency_sandata_provider
+from backend.services.client_intake import intake_options, resolve_intake, persist_intake
 from backend.services.timezone import (
     SQLSERVER_EASTERN_NOW_EXPR,
     SQLSERVER_LOCAL_DATE_EXPR,
@@ -195,6 +197,13 @@ def _read_client_care_tasks(
     )
 
 
+@router.get('/intake-options')
+def get_intake_options(db: Session = Depends(get_db), scope: AgencyScope = Depends(get_agency_scope)):
+    if scope.agency_id is None:
+        raise HTTPException(403, 'Sign in to an agency to add clients.')
+    return intake_options(db, scope.agency_id)
+
+
 @router.post("", response_model=ClientCreateResponse, status_code=201)
 def create_client(
     body: ClientCreateRequest,
@@ -205,6 +214,7 @@ def create_client(
     Create a new client record in the DB and submit to the Sandata EVV simulator.
     """
     try:
+        resolved_intake = resolve_intake(body, db, scope.agency_id)
         # Normalize medicaid_id and derive client_code
         medicaid_digits = "".join(c for c in (body.medicaid_id or "") if c.isdigit())
         if not medicaid_digits:
@@ -276,6 +286,8 @@ def create_client(
                 "zip":       body.zip_code or "",
             },
         )
+
+        persist_intake(client_id, body, resolved_intake, db, scope.agency_id, now_local)
 
         # ── EVV registration (skipped for Core tier agencies) ───────────────
         if scope.agency_tier == 'core':
@@ -389,7 +401,8 @@ def get_client(
                     c.gender,
                     c.ssn_last4,
                     c.phone,
-                    c.email,
+                    c.email, c.middle_name, c.place_of_service,
+                    CONVERT(VARCHAR, c.care_plan_start_date, 23) AS care_plan_start_date,
                     c.status,
                     c.primary_language,
                     c.secondary_language,
@@ -432,6 +445,9 @@ def get_client(
         )
 
         return ClientDetail(
+            middle_name=getattr(row, 'middle_name', None),
+            place_of_service=getattr(row, 'place_of_service', None),
+            care_plan_start_date=getattr(row, 'care_plan_start_date', None),
             id=int(row.id),
             client_code=str(row.client_code),
             first_name=str(row.first_name),
@@ -486,7 +502,7 @@ def get_client_insurance(
             text("""
                 SELECT
                     p.id,
-                    p.payer_id,
+                    p.payer_id, p.payer_name, p.managed_care_plan,
                     p.program,
                     p.waiver_id,
                     w.waiver_code,
@@ -505,6 +521,7 @@ def get_client_insurance(
         return [
             ClientPayerItem(
                 id=int(r.id),
+                payer_name=getattr(r, 'payer_name', None), managed_care_plan=getattr(r, 'managed_care_plan', None),
                 payer_id=str(r.payer_id),
                 waiver_id=r.waiver_id,
                 program=str(r.program),
@@ -533,19 +550,19 @@ def get_client_authorizations(
     try:
         _ensure_client_exists(client_id, db, scope)
         rows = db.execute(
-            text("""
+            text(f"""
                 SELECT
                     sa.id,
                     sa.service_code_id, sa.provider_id,
                     sc.hcpcs_code                                               AS service_code,
                     sc.description                                              AS service_description,
-                    sa.auth_number,
+                    sa.auth_number, sa.place_of_service, sa.notes,
                     CAST(sa.authorized_units AS FLOAT)                          AS authorized_units,
-                    CAST(sa.used_units       AS FLOAT)                          AS used_units,
-                    CAST(sa.authorized_units - sa.used_units AS FLOAT)          AS remaining_units,
+                    CAST(auth_usage.used_units       AS FLOAT)                          AS used_units,
+                    CAST(sa.authorized_units - auth_usage.used_units AS FLOAT)          AS remaining_units,
                     CAST(
                         CASE WHEN sa.authorized_units > 0
-                             THEN sa.used_units * 100.0 / sa.authorized_units
+                             THEN auth_usage.used_units * 100.0 / sa.authorized_units
                              ELSE 0 END
                     AS FLOAT)                                                   AS utilization_pct,
                     CONVERT(VARCHAR, sa.service_start_date, 23)                 AS service_start_date,
@@ -554,6 +571,7 @@ def get_client_authorizations(
                 FROM care.service_authorizations sa
                 JOIN care.service_codes sc ON sc.id = sa.service_code_id
                 JOIN care.clients c ON c.id = sa.client_id AND c.agency_id = sa.agency_id
+                {authorization_usage_join()}
                 WHERE sa.client_id = :client_id
                 ORDER BY sa.is_active DESC, sa.service_end_date DESC
             """),
@@ -566,6 +584,7 @@ def get_client_authorizations(
                 service_code=str(r.service_code),
                 service_code_id=r.service_code_id, provider_id=r.provider_id,
                 service_description=str(r.service_description),
+                place_of_service=getattr(r, 'place_of_service', None), notes=getattr(r, 'notes', None),
                 auth_number=r.auth_number,
                 authorized_units=round(float(r.authorized_units or 0), 2),
                 used_units=round(float(r.used_units or 0), 2),
@@ -760,6 +779,7 @@ def get_clients(
                 SELECT
                     c.id,
                     c.client_code,
+                    CONVERT(VARCHAR(33), c.created_at, 126) AS created_at,
                     c.first_name + ' ' + c.last_name AS name,
                     DATEDIFF(YEAR,
                         TRY_CAST(c.date_of_birth AS DATE),
@@ -768,12 +788,12 @@ def get_clients(
                     ca.state,
                     c.status,
                     -- service type from most recent active authorization
-                    (SELECT TOP 1 sc.description
+                    COALESCE((SELECT TOP 1 sc.description
                      FROM care.service_authorizations sa
                      JOIN care.service_codes sc ON sa.service_code_id = sc.id
                      WHERE sa.client_id = c.id AND sa.agency_id = c.agency_id AND sa.is_active = 1
                      ORDER BY sa.created_at DESC
-                    ) AS service_type,
+                    ), (SELECT description FROM care.service_codes WHERE id = c.intake_service_code_id)) AS service_type,
                     -- primary caregiver from most recent schedule
                     (SELECT TOP 1 e.first_name + ' ' + e.last_name
                      FROM care.schedules s
@@ -792,6 +812,7 @@ def get_clients(
                     CONVERT(VARCHAR, TRY_CAST(c.care_plan_review_date AS DATE), 23) AS care_plan_review_date,
                     -- care plan status
                     CASE
+                        WHEN c.care_plan_review_date IS NULL AND (c.care_plan_start_date IS NOT NULL OR NULLIF(c.care_plan_notes, '') IS NOT NULL OR NULLIF(c.care_coordinator, '') IS NOT NULL) THEN 'Review not set'
                         WHEN c.care_plan_review_date IS NULL THEN 'No Plan'
                         WHEN TRY_CAST(c.care_plan_review_date AS DATE) < {SQLSERVER_LOCAL_DATE_EXPR}
                             THEN 'Overdue'
@@ -809,7 +830,7 @@ def get_clients(
                 LEFT JOIN care.client_addresses ca
                     ON ca.client_id = c.id AND ca.is_primary = 1
                 {where_sql}
-                ORDER BY c.last_name, c.first_name
+                ORDER BY CASE WHEN c.created_at IS NULL THEN 1 ELSE 0 END, c.created_at DESC, c.id DESC
                 OFFSET :offset ROWS FETCH NEXT :per_page ROWS ONLY
                 """
             ),
@@ -818,6 +839,7 @@ def get_clients(
 
         items = [
             ClientSummary(
+                created_at=getattr(r, 'created_at', None),
                 id=int(r.id),
                 client_code=str(r.client_code),
                 name=str(r.name),
@@ -1120,6 +1142,9 @@ def update_client(
         params: dict = {"client_id": client_id}
 
         field_map = {
+            "middle_name": "middle_name",
+            "care_plan_start_date": "care_plan_start_date",
+            "place_of_service": "place_of_service",
             "first_name": "first_name",
             "last_name": "last_name",
             "date_of_birth": "date_of_birth",
@@ -1151,7 +1176,7 @@ def update_client(
             val = getattr(payload, field)
             if val is not None:
                 set_parts.append(f"{col} = :{field}")
-                params[field] = val
+                params[field] = None if field in ('care_plan_start_date', 'care_plan_review_date') and val == '' else val
 
         if set_parts:
             db.execute(

@@ -5,6 +5,7 @@ Returns DashboardMetrics built from 6 SQL Server queries against the care schema
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from backend.services.authorization_usage import authorization_usage_join
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -81,14 +82,15 @@ def get_dashboard_authorizations(
             SELECT sa.id AS auth_id, c.id AS client_id,
                    c.first_name + ' ' + c.last_name AS client_name,
                    sc.hcpcs_code AS service_code, sa.auth_number,
-                   sa.authorized_units, sa.used_units,
+                   sa.authorized_units, auth_usage.used_units, auth_unassigned.unassigned_visits,
                    DATEDIFF(DAY, {SQLSERVER_LOCAL_DATE_EXPR}, sa.service_end_date) AS days_until_expiry
             FROM care.service_authorizations sa
             JOIN care.clients c ON c.id = sa.client_id AND c.agency_id = sa.agency_id
             LEFT JOIN care.service_codes sc ON sc.id = sa.service_code_id
+            {authorization_usage_join(include_unassigned=True)}
             WHERE sa.is_active = 1 AND c.is_active = 1 AND {scope.sql_filter('sa')}
             ORDER BY CASE WHEN sa.service_end_date IS NULL THEN 1 ELSE 0 END,
-                     sa.service_end_date, c.first_name, c.last_name, sa.id
+                     sa.service_end_date, CASE WHEN sa.authorized_units > 0 THEN auth_usage.used_units / sa.authorized_units ELSE 0 END DESC, c.first_name, c.last_name, sa.id
         """),
         scope.bind({}),
     ).fetchall()
@@ -96,6 +98,7 @@ def get_dashboard_authorizations(
         auth_id=r.auth_id, client_id=r.client_id, client_name=r.client_name,
         service_code=r.service_code, auth_number=r.auth_number,
         authorized_units=float(r.authorized_units or 0),
+        unassigned_visits=int(getattr(r, 'unassigned_visits', 0) or 0),
         used_units=float(r.used_units or 0), days_until_expiry=r.days_until_expiry,
     ) for r in rows]
 

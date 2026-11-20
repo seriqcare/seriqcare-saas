@@ -24,6 +24,7 @@ export interface ClientStats {
 }
 
 export interface ClientSummary {
+  created_at?: string | null;
   id: number;
   client_code: string;
   name: string;
@@ -39,6 +40,9 @@ export interface ClientSummary {
 }
 
 export interface ClientDetail {
+  middle_name?: string | null;
+  care_plan_start_date?: string | null;
+  place_of_service?: string | null;
   id: number;
   client_code: string;
   first_name: string;
@@ -75,6 +79,8 @@ export interface ClientDetail {
 }
 
 export interface ClientPayerItem {
+  payer_name?: string | null;
+  managed_care_plan?: string | null;
   id: number;
   payer_id: string;
   program: string;
@@ -86,6 +92,8 @@ export interface ClientPayerItem {
 }
 
 export interface ClientAuthItem {
+  notes?: string | null;
+  place_of_service?: string | null;
   id: number;
   service_code: string;
   service_description: string;

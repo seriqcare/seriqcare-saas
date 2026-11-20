@@ -12,6 +12,7 @@ export interface CaregiverStats {
 }
 
 export interface CaregiverSummary {
+  created_at?: string | null;
   id: number;
   employee_code: string;
   name: string;

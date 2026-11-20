@@ -1,0 +1,52 @@
+.page { display: grid; gap: 16px; min-width: 0; }
+.heading h2 { font-size: 18px; margin: 0 0 4px; }
+.subtitle { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 3px 0 0; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.equalCards { align-items: stretch; }
+.card { min-width: 0; background: #fff; border: 1px solid var(--line); border-radius: 5px; padding: 16px; }
+.cardHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.card h3 { font-size: 13px; line-height: 1.5; margin: 0; }
+.cardHeader button { flex-shrink: 0; }
+.summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.summary div { min-width: 0; }
+.summary dt, .label { display: block; color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; margin: 0 0 6px; }
+.summary dd { margin: 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.badge { display: inline-flex; padding: 3px 9px; font-size: 10px; line-height: 1.5; font-weight: 600; color: #375674; background: #f1f6fc; border: 1px solid #d7e2ef; border-radius: 20px; }
+.hint { font-size: 11px; line-height: 1.5; color: var(--muted); margin: 12px 0 0; }
+.tableWrap { overflow-x: auto; }
+.table { min-width: 0; width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 5px; }
+.table th, .table td { padding: 12px; font-size: 12px; vertical-align: middle; }
+.table th { font-size: 10px; }
+.table th:last-child { width: 72px; }
+.table .action { text-align: right; white-space: nowrap; padding-right: 12px; }
+.edit { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 28px; padding: 4px 6px; border: 0; border-radius: 4px; background: transparent; color: var(--primary); font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; cursor: pointer; }
+.edit:hover { background: #e7f0fa; }
+.delete { color: #ad3131; }
+.delete:hover { background: #fff0f0; }
+.table .rateActions { width: 128px; }
+.rowActions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.dialogFooter .dangerButton { color: #fff; background: #ad3131; border-color: #ad3131; }
+.dialogFooter .dangerButton:hover { background: #912828; }
+.dialog { border: 1px solid var(--line); border-radius: 8px; padding: 0; width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); color: var(--text); box-shadow: 0 18px 70px #10243d40; }
+.dialog::backdrop { background: #10243d66; }
+.dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 50px); }
+.dialogHeader { padding: 20px 24px 16px; border-bottom: 1px solid var(--line); }
+.dialogHeader h2 { margin: 0; font-size: 17px; }
+.dialogBody { padding: 20px 24px; overflow-y: auto; min-height: 0; }
+.dialogBody fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.fields label { min-width: 0; }
+.fields :is(input, select, textarea) { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; font-size: 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--text); }
+.fields :is(input, select, textarea):focus { outline: 2px solid #c9def5; border-color: var(--primary); }
+.full { grid-column: 1 / -1; }
+.dialogFooter { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px; border-top: 1px solid var(--line); background: #fbfcfe; }
+.dialog button { min-height: 32px; }
+.toast { position: fixed; right: 24px; bottom: 24px; z-index: 1200; background: #205b3e; color: #fff; padding: 12px 18px; border-radius: 5px; box-shadow: 0 3px 16px #0002; font-size: 13px; }
+@media (max-width: 760px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .table th, .table td { padding: 9px 6px; font-size: 10px; }
+}
+@media (max-width: 480px) {
+  .fields, .summary { grid-template-columns: minmax(0, 1fr); }
+  .dialogHeader, .dialogBody, .dialogFooter { padding: 16px; }
+}

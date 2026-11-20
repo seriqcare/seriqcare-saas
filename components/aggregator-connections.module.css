@@ -1,0 +1,8 @@
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.grid > * { min-width: 0; }
+.details { display: grid; gap: 12px; margin: 0; font-size: 12px; }
+.details > div { display: grid; grid-template-columns: 85px minmax(0, 1fr); gap: 10px; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.note { margin: 14px 0 0; color: var(--muted); font-size: 11px; }
+@media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }

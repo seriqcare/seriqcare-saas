@@ -9,7 +9,7 @@ export function LiveVisitRefresh() {
   useEffect(() => {
     const refresh = () => {
       if (pending || document.visibilityState !== 'visible') return;
-      if (document.querySelector('[role="dialog"], input:focus, select:focus, textarea:focus')) return;
+      if (document.querySelector('dialog[open], [role="dialog"], input:focus, select:focus, textarea:focus')) return;
       startTransition(() => router.refresh());
     };
     const timer = setInterval(refresh, 30000);

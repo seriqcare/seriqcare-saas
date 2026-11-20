@@ -66,6 +66,7 @@ export interface CaregiverUtilization {
 }
 
 export interface DashboardAuthorization {
+  unassigned_visits?: number;
   auth_id: number;
   client_id: number;
   client_name: string;

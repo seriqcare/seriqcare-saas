@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 os.environ.setdefault('SECRET_KEY', 'test-only-service-rates-secret')
 from backend.auth.dependencies import get_agency_scope, get_current_user
-from backend.routers.service_rates import router, ServiceRateInput, _save_rate
+from backend.routers.service_rates import router, ServiceRateInput, _save_rate, delete_service_rate
 from backend.routers.billing import _build_groups, generate_claim
 from backend.schemas import BillingClaimCreate
 from db.database import get_db
@@ -70,9 +70,31 @@ class ServiceRateTests(unittest.TestCase):
                        'query_string': b'', 'root_path': '', 'headers': [(b'content-type', b'application/json')],
                        'client': ('127.0.0.1', 1), 'server': ('test', 80)}, receive, send)
             return next(m['status'] for m in messages if m['type'] == 'http.response.start')
-        for method, path in [('POST', '/service-rates'), ('PUT', '/service-rates/1')]:
+        for method, path in [('POST', '/service-rates'), ('PUT', '/service-rates/1'), ('DELETE', '/service-rates/1')]:
             self.assertEqual(asyncio.run(request(method, path)), 403)
         db.execute.assert_not_called()
+
+    def test_deletion_removes_only_own_agency_rate_and_does_not_touch_claims(self):
+        db = MagicMock()
+        db.execute.return_value.fetchone.side_effect = [SimpleNamespace(id=4), SimpleNamespace(id=12)]
+        result = delete_service_rate(12, db, self.scope())
+        self.assertEqual(result.status_code, 204)
+        sql, params = db.execute.call_args.args
+        self.assertIn('DELETE FROM care.agency_service_rates', str(sql))
+        self.assertIn('agency_id = :agency_id', str(sql))
+        self.assertEqual(params, {'agency_id': 4, 'rate_id': 12})
+        self.assertFalse(any('billing_claim' in str(call.args[0]) for call in db.execute.call_args_list))
+        db.commit.assert_called_once()
+
+    def test_deletion_of_foreign_or_missing_rate_returns_not_found(self):
+        db = MagicMock()
+        db.execute.return_value.fetchone.side_effect = [SimpleNamespace(id=4), None]
+        with self.assertRaises(HTTPException) as error:
+            delete_service_rate(99, db, self.scope())
+        self.assertEqual(error.exception.status_code, 404)
+        self.assertEqual(db.execute.call_args.args[1]['agency_id'], 4)
+        db.commit.assert_not_called()
+        db.rollback.assert_called_once()
 
     def test_missing_rates_block_bulk_before_any_write(self):
         db = MagicMock()

@@ -2,6 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { SettingsDialog } from './settings-dialog';
+import styles from './settings-panels.module.css';
 import { useAuth } from '@/components/auth-context';
 
 type Service = { id: number; hcpcs_code: string; modifier: string | null; description: string; unit_type: string };
@@ -21,6 +23,7 @@ export function ServiceRatesSettings() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState<number | 'new' | null>(null);
+  const [deleting, setDeleting] = useState<Rate | null>(null);
   const [form, setForm] = useState<Form>(blank);
   const canEdit = user?.role === 'agency_admin';
   const selected = services.find(s => s.id === Number(form.service_code_id));
@@ -70,18 +73,39 @@ export function ServiceRatesSettings() {
     } finally { pending.current = false; setSaving(false); }
   }
 
+  async function confirmDelete(event: FormEvent) {
+    event.preventDefault();
+    if (!deleting || pending.current) return;
+    pending.current = true;
+    setSaving(true); setError('');
+    const rateId = deleting.id;
+    try {
+      const response = await apiFetch(`/api/settings/service-rates/${rateId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not delete the service rate.');
+      }
+      setRates(current => current.filter(rate => rate.id !== rateId));
+      setDeleting(null); setNotice('Service rate deleted.'); router.refresh();
+      try { await load(); } catch { setError('Rate deleted. Reload to refresh the rate list.'); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not delete the service rate.'); }
+    finally { pending.current = false; setSaving(false); }
+  }
+
   return (
-    <section className="form-section-card" aria-label="Service Rates">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <div className="form-section-heading">Service Rates</div>
-        {canEdit && editing === null && <button className="btn primary sm" disabled={loading || !services.length} onClick={() => { setEditing('new'); setForm(blank); setError(''); }}>+ Add Rate</button>}
+    <section className={styles.card} aria-label="Service Rates">
+      <div className={styles.cardHeader}>
+        <div><h3>Service Rates</h3><p className={styles.subtitle}>Billing rates per service unit. Visit dates determine which rate applies.</p></div>
+        {canEdit && <button className="btn primary" disabled={loading || !services.length || saving} onClick={() => { setEditing('new'); setForm(blank); setError(''); }}>+ Add Rate</button>}
       </div>
-      <div className="form-section-sub">Billing rates for your agency, per service unit. Visit dates determine which rate applies. Existing claims keep their saved amounts.</div>
-      {notice && <div role="status" style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 1100, padding: '12px 18px', borderRadius: 6, background: '#1b5e20', color: 'white', boxShadow: '0 3px 12px #0002' }}>{notice}</div>}
-      {error && <div role="alert" className="error-text">{error} {editing === null && <button className="btn secondary sm" onClick={() => { setError(''); load().catch(e => setError(e.message)); }}>Retry</button>}</div>}
-      {editing !== null && <form onSubmit={save} style={{ margin: '12px 0 18px' }}>
-        <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+      {notice && <div role="status" className={styles.toast}>{notice}</div>}
+      {error && editing === null && deleting === null && <div role="alert" className="error-text">{error} <button className="btn secondary sm" onClick={() => { setError(''); load().catch(e => setError(e.message)); }}>Retry</button></div>}
+      {deleting && <SettingsDialog title="Delete service rate?" description="Confirm the service rate you want to remove." onSubmit={confirmDelete} busy={saving} error={error} destructive submitLabel="Delete rate" onClose={() => { if (!saving) { setDeleting(null); setError(''); } }}>
+        <dl className={styles.summary}><div><dt>Service</dt><dd>{label(deleting)}</dd></div><div><dt>Rate per unit</dt><dd>${Number(deleting.rate_per_unit).toFixed(2)} / {deleting.unit_type}</dd></div><div><dt>Effective from</dt><dd>{deleting.effective_from}</dd></div><div><dt>Effective to</dt><dd>{deleting.effective_to || 'No end date'}</dd></div></dl>
+        <p className={styles.hint}>This cannot be undone. Existing claims keep their saved amounts. Visits covered by this rate may show “Rate not configured” until a replacement is added.</p>
+      </SettingsDialog>}
+      {editing !== null && <SettingsDialog title={editing === 'new' ? 'Add service rate' : 'Edit service rate'} description="Set the rate and dates for this service. Existing claims keep their saved amounts." onSubmit={save} busy={saving} error={error} onClose={() => { if (!saving) { setEditing(null); setForm(blank); setError(''); } }}>
+          <div className={styles.fields}>
             <label className="info-field"><span className="info-label">Service Code *</span>
               <select className="form-select" required value={form.service_code_id} onChange={e => setForm(f => ({ ...f, service_code_id: e.target.value }))}>
                 <option value="">Select service</option>{services.map(s => <option key={s.id} value={s.id}>{label(s)}</option>)}
@@ -95,13 +119,11 @@ export function ServiceRatesSettings() {
             <label className="info-field"><span className="info-label">Effective To</span><input className="input" type="date" min={form.effective_from} value={form.effective_to} onChange={e => setForm(f => ({ ...f, effective_to: e.target.value }))} /><span style={{ fontSize: 11, color: 'var(--muted)' }}>Blank means no end date.</span></label>
           </div>
           <p style={{ fontSize: 11, color: 'var(--muted)' }}>Date ranges include both dates. For a new rate, end the previous rate the day before the new rate starts.</p>
-          <div style={{ display: 'flex', gap: 8 }}><button className="btn primary sm" type="submit">{saving ? 'Saving…' : 'Save Rate'}</button><button type="button" className="btn secondary sm" onClick={() => { setEditing(null); setError(''); }}>Cancel</button></div>
-        </fieldset>
-      </form>}
-      {loading ? <p role="status">Loading service rates…</p> : rates.length ? <div style={{ overflowX: 'auto' }}><table style={{ width: '100%' }}>
-        <thead><tr><th>Service</th><th>Unit</th><th>Rate / Unit</th><th>Effective From</th><th>Effective To</th>{canEdit && <th>Actions</th>}</tr></thead>
-        <tbody>{rates.map(r => <tr key={r.id}><td>{label(r)}</td><td>{r.unit_type}</td><td>${Number(r.rate_per_unit).toFixed(2)}</td><td>{r.effective_from}</td><td>{r.effective_to || 'No end date'}</td>{canEdit && <td><button className="btn secondary sm" disabled={saving} onClick={() => { setEditing(r.id); setError(''); setForm({ service_code_id: String(r.service_code_id), rate_per_unit: String(r.rate_per_unit), effective_from: r.effective_from, effective_to: r.effective_to || '' }); }}>Edit</button></td>}</tr>)}</tbody>
-      </table></div> : !error && <p style={{ color: 'var(--muted)', fontSize: 12 }}>No service rates configured for this agency.{canEdit ? ' Add a rate to calculate billing estimates.' : ' Ask your agency administrator to configure rates.'}</p>}
+      </SettingsDialog>}
+      {loading ? <p role="status">Loading service rates...</p> : rates.length ? <div className={styles.tableWrap}><table className={styles.table}>
+        <thead><tr><th>Service</th><th>Unit</th><th>Rate / Unit</th><th>Effective From</th><th>Effective To</th>{canEdit && <th className={`${styles.action} ${styles.rateActions}`}>Actions</th>}</tr></thead>
+        <tbody>{rates.map(r => <tr key={r.id}><td>{label(r)}</td><td>{r.unit_type}</td><td>${Number(r.rate_per_unit).toFixed(2)}</td><td>{r.effective_from}</td><td>{r.effective_to || 'No end date'}</td>{canEdit && <td className={styles.action}><span className={styles.rowActions}><button className={styles.edit} disabled={saving} aria-label={`Edit ${r.hcpcs_code} rate`} onClick={() => { setEditing(r.id); setError(''); setForm({ service_code_id: String(r.service_code_id), rate_per_unit: String(r.rate_per_unit), effective_from: r.effective_from, effective_to: r.effective_to || '' }); }}>Edit</button><button className={`${styles.edit} ${styles.delete}`} disabled={saving} aria-label={`Delete ${r.hcpcs_code} rate`} onClick={() => { setDeleting(r); setError(''); }}>Delete</button></span></td>}</tr>)}</tbody>
+      </table></div> : !error && <p className={styles.subtitle}>No service rates configured for this agency.{canEdit ? ' Add a rate to calculate billing estimates.' : ' Ask your agency administrator to configure rates.'}</p>}
     </section>
   );
 }

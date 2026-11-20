@@ -19,6 +19,7 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from backend.services.authorization_usage import authorization_usage_join
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -45,6 +46,11 @@ from backend.schemas import (
 )
 
 router = APIRouter()
+
+
+def _legacy_claim_workflow_retired(scope: AgencyScope = Depends(get_agency_scope)):
+    raise HTTPException(410, "Claim generation and untracked exports have been replaced. Use Billing > Export Billing Data or Timesheets > Export Payroll. Existing records remain read-only.")
+
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +334,7 @@ def get_billing_stats(
 # POST /api/billing/generate
 # ---------------------------------------------------------------------------
 
-@router.post("/generate", response_model=BillingClaimResponse)
+@router.post("/generate", response_model=BillingClaimResponse, dependencies=[Depends(_legacy_claim_workflow_retired)])
 def generate_claim(
     body: BillingClaimCreate,
     db: Session = Depends(get_db),
@@ -467,11 +473,11 @@ def get_auth_utilization(
                     sc.hcpcs_code                                           AS service_code,
                     sa.auth_number,
                     CAST(sa.authorized_units AS FLOAT)                      AS authorized_units,
-                    CAST(sa.used_units       AS FLOAT)                      AS used_units,
-                    CAST(sa.authorized_units - sa.used_units AS FLOAT)      AS remaining_units,
+                    CAST(auth_usage.used_units       AS FLOAT)                      AS used_units,
+                    CAST(sa.authorized_units - auth_usage.used_units AS FLOAT)      AS remaining_units,
                     CAST(
                         CASE WHEN sa.authorized_units > 0
-                             THEN sa.used_units * 100.0 / sa.authorized_units
+                             THEN auth_usage.used_units * 100.0 / sa.authorized_units
                              ELSE 0 END
                     AS FLOAT)                                               AS utilization_pct,
                     CONVERT(VARCHAR, sa.service_start_date, 23)             AS service_start_date,
@@ -481,11 +487,12 @@ def get_auth_utilization(
                 FROM care.service_authorizations sa
                 JOIN care.clients      c  ON c.id  = sa.client_id
                 JOIN care.service_codes sc ON sc.id = sa.service_code_id
+                {authorization_usage_join()}
                 WHERE sa.is_active = 1
                   {extra_where}
                 ORDER BY
                     CASE WHEN sa.authorized_units > 0
-                         THEN sa.used_units * 100.0 / sa.authorized_units
+                         THEN auth_usage.used_units * 100.0 / sa.authorized_units
                          ELSE 0 END DESC
             """),
             params,
@@ -737,7 +744,7 @@ def export_claim(
 # GET /api/billing/export  (Phase 3) — bulk billing-entries CSV for a period
 # ---------------------------------------------------------------------------
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(_legacy_claim_workflow_retired)])
 def export_billing_entries(
     period: str = Query(default="this_month"),
     db: Session = Depends(get_db),
@@ -916,7 +923,7 @@ def _build_groups(db: Session, period_start: date, period_end: date, scope: Agen
 # GET /api/billing/group-visits  — preview grouping (no DB writes)
 # ---------------------------------------------------------------------------
 
-@router.get("/group-visits", response_model=ClaimGroupPreview)
+@router.get("/group-visits", response_model=ClaimGroupPreview, dependencies=[Depends(_legacy_claim_workflow_retired)])
 def preview_claim_groups(
     period: str = Query(default="this_month"),
     db: Session = Depends(get_db),
@@ -961,7 +968,7 @@ def preview_claim_groups(
 # POST /api/billing/generate-bulk  — group + create all claims for a period
 # ---------------------------------------------------------------------------
 
-@router.post("/generate-bulk", response_model=BulkGenerateResponse)
+@router.post("/generate-bulk", response_model=BulkGenerateResponse, dependencies=[Depends(_legacy_claim_workflow_retired)])
 def generate_bulk_claims(
     body: BulkGenerateRequest,
     db: Session = Depends(get_db),
@@ -1042,7 +1049,7 @@ def generate_bulk_claims(
 # PATCH /api/billing/claims/{claim_id}/status  — claim status management
 # ---------------------------------------------------------------------------
 
-@router.patch("/claims/{claim_id}/status", response_model=BillingClaimListItem)
+@router.patch("/claims/{claim_id}/status", response_model=BillingClaimListItem, dependencies=[Depends(_legacy_claim_workflow_retired)])
 def update_claim_status(
     claim_id: int,
     body: ClaimStatusUpdate,

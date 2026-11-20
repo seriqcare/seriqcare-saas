@@ -188,7 +188,9 @@ export default async function SchedulePage({
   }
 
   const coveragePct = stats.coverage_rate;
-  const visitsPage = paginateScheduleVisits(filteredEntries, params.page);
+  const visitsByDateDescending = [...filteredEntries].sort((a, b) =>
+    parseDateTime(b.scheduled_start).getTime() - parseDateTime(a.scheduled_start).getTime() || b.id - a.id);
+  const visitsPage = paginateScheduleVisits(visitsByDateDescending, params.page);
   const lastVisiblePage = Math.min(visitsPage.totalPages, Math.max(5, visitsPage.page + 2));
   const firstVisiblePage = Math.max(1, lastVisiblePage - 4);
   const visitPageNumbers = Array.from({ length: lastVisiblePage - firstVisiblePage + 1 }, (_, index) => firstVisiblePage + index);

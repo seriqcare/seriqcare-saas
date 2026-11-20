@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault('SECRET_KEY', 'test-only-settings-identity-secret')
 from backend.auth.dependencies import AgencyScope
 from backend.routers import settings
-from backend.schemas import AgencySettings, PayrollGroup
+from backend.schemas import AgencySettings, PayrollGroup, BillingIdentity
 
 
 class SettingsIdentityTests(unittest.TestCase):
@@ -45,6 +45,22 @@ class SettingsIdentityTests(unittest.TestCase):
         sql, params = db.execute.call_args.args
         self.assertIn('e.agency_id = :_agy_id', str(sql))
         self.assertEqual(params['_agy_id'], 4)
+
+    def test_billing_identity_saves_to_agency_without_overwriting_other_settings(self):
+        db = MagicMock()
+        db.execute.return_value.fetchone.return_value = SimpleNamespace(primary_contact_email='registered@example.com')
+        identity = BillingIdentity(npi='1234567890', taxonomy='251E00000X', ein='12-3456789', medicaid='PA123')
+        with patch.object(settings, '_read', return_value={'phone': '717-555-0100'}), patch.object(settings, '_write') as write:
+            settings.update_agency(AgencySettings(billing_identity=identity), db, self.scope())
+        saved, agency_id, _ = write.call_args.args
+        self.assertEqual(saved['billing_identity'], identity.model_dump())
+        self.assertEqual(saved['phone'], '717-555-0100')
+        self.assertEqual(agency_id, 4)
+
+    def test_billing_identity_is_retained_by_settings_serialization(self):
+        saved = settings._merge_settings({'billing_identity': {'npi': '1234567890', 'taxonomy': '', 'ein': '', 'medicaid': ''}})
+        self.assertEqual(AgencySettings(**saved).billing_identity.npi, '1234567890')
+        self.assertEqual(settings._merge_settings({})['billing_identity']['npi'], '')
 
 
 if __name__ == '__main__':

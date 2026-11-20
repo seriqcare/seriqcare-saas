@@ -101,6 +101,7 @@ export default async function CaregiversPage({
               <thead>
                 <tr>
                   <th>Caregiver</th>
+                  <th>Created Date</th>
                   <th>Role</th>
                   <th>Status</th>
                   <th>Clients</th>
@@ -113,7 +114,7 @@ export default async function CaregiversPage({
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', color: '#999', padding: '40px 0' }}>
+                    <td colSpan={9} style={{ textAlign: 'center', color: '#999', padding: '40px 0' }}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>No caregivers found</div>
                       <div style={{ fontSize: 11 }}>Check API connection or add your first caregiver</div>
                     </td>
@@ -145,6 +146,7 @@ export default async function CaregiversPage({
                             </div>
                           </Link>
                         </td>
+                        <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
                         <td>
                           <span style={{ fontSize: 11, fontWeight: 700, color: roleColor, background: roleColor + '18', padding: '3px 8px', borderRadius: 4, border: `1px solid ${roleColor}30` }}>
                             {ROLE_ABBR[c.role] ?? c.role.slice(0, 3).toUpperCase()}

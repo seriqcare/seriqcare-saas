@@ -10,6 +10,8 @@ export interface VisitStats {
 }
 
 export interface VisitEntry {
+  in_progress?: boolean;
+  overdue?: boolean;
   edit_locked?: boolean;
   sandata_submission_count?: number;
   id: number;
@@ -39,7 +41,14 @@ export interface VisitSubmitResult {
   payload?: object;
 }
 
+export interface VisitVerificationSummary {
+  total: number; due: number; verified_due: number; in_progress: number; overdue: number;
+  exempt: number; verified: number; adjusted: number; pending: number; failed: number;
+  exceptions: number; missing_clock: number; rejected: number;
+}
+
 export interface VisitsResponse {
+  summary?: VisitVerificationSummary | null;
   total: number;
   page: number;
   per_page: number;

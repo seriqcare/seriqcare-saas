@@ -2,7 +2,7 @@
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -112,3 +112,29 @@ def create_service_rate(body: ServiceRateInput, db: Session = Depends(get_db), s
 @router.put('/service-rates/{rate_id}', dependencies=[Depends(require_role('agency_admin'))])
 def update_service_rate(rate_id: int, body: ServiceRateInput, db: Session = Depends(get_db), scope: AgencyScope = Depends(get_agency_scope)):
     return _save_rate(body, rate_id, db, scope)
+
+
+@router.delete('/service-rates/{rate_id}', status_code=204, dependencies=[Depends(require_role('agency_admin'))])
+def delete_service_rate(rate_id: int, db: Session = Depends(get_db), scope: AgencyScope = Depends(get_agency_scope)):
+    agency_id = _agency(scope)
+    params = {'agency_id': agency_id, 'rate_id': rate_id}
+    try:
+        # Use the same agency lock as saves to serialize rate changes.
+        agency = db.execute(text('''
+            SELECT id FROM care.agencies WITH (UPDLOCK, HOLDLOCK) WHERE id = :agency_id
+        '''), params).fetchone()
+        if not agency:
+            raise HTTPException(404, 'Agency not found.')
+        deleted = db.execute(text('''
+            DELETE FROM care.agency_service_rates
+            OUTPUT DELETED.id
+            WHERE id = :rate_id AND agency_id = :agency_id
+        '''), params).fetchone()
+        if not deleted:
+            raise HTTPException(404, 'Service rate not found.')
+        # Claims keep their saved line amounts; they do not reference this rate row.
+        db.commit()
+        return Response(status_code=204)
+    except Exception:
+        db.rollback()
+        raise

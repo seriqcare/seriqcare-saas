@@ -27,15 +27,19 @@ class Period(BaseModel):
 
 
 class InsuranceInput(Period):
+    payer_name: str | None = Field(default=None, max_length=100)
+    managed_care_plan: str | None = Field(default=None, max_length=100)
     payer_id: str = Field(min_length=1, max_length=20)
     program: str = Field(min_length=1, max_length=20)
     waiver_id: int | None = Field(default=None, gt=0)
-    effective_date: date
+    effective_date: date | None = None
     end_date: date | None = None
     is_active: bool = True
 
 
 class AuthorizationInput(Period):
+    notes: str | None = Field(default=None, max_length=2000)
+    place_of_service: Literal['12', '99'] | None = None
     service_code_id: int = Field(gt=0)
     provider_id: int = Field(gt=0)
     auth_number: str | None = Field(default=None, max_length=50)
@@ -158,12 +162,12 @@ def _save_insurance(client_id, body, db, scope, record_id=None):
     try:
         if record_id is None:
             row = db.execute(text('''
-                INSERT INTO care.client_payer_info (client_id,payer_id,program,waiver_id,effective_date,end_date,is_active)
-                OUTPUT INSERTED.id VALUES (:client_id,:payer_id,:program,:waiver_id,:effective_date,:end_date,:is_active)
+                INSERT INTO care.client_payer_info (client_id,payer_id,payer_name,program,managed_care_plan,waiver_id,effective_date,end_date,is_active)
+                OUTPUT INSERTED.id VALUES (:client_id,:payer_id,:payer_name,:program,:managed_care_plan,:waiver_id,:effective_date,:end_date,:is_active)
             '''), values).fetchone()
         else:
             row = db.execute(text('''
-                UPDATE care.client_payer_info SET payer_id=:payer_id,program=:program,waiver_id=:waiver_id,
+                UPDATE care.client_payer_info SET payer_id=:payer_id,payer_name=:payer_name,program=:program,managed_care_plan=:managed_care_plan,waiver_id=:waiver_id,
                     effective_date=:effective_date,end_date=:end_date,is_active=:is_active
                 OUTPUT INSERTED.id WHERE id=:id AND client_id=:client_id
             '''), values).fetchone()
@@ -198,15 +202,15 @@ def _save_authorization(client_id, body, db, scope, record_id=None):
         if record_id is None:
             row = db.execute(text('''
                 INSERT INTO care.service_authorizations (agency_id,client_id,service_code_id,provider_id,auth_number,
-                    authorized_units,used_units,service_start_date,service_end_date,is_active)
+                    authorized_units,used_units,service_start_date,service_end_date,place_of_service,notes,is_active)
                 OUTPUT INSERTED.id VALUES (:agency_id,:client_id,:service_code_id,:provider_id,:auth_number,
-                    :authorized_units,0,:service_start_date,:service_end_date,:is_active)
+                    :authorized_units,0,:service_start_date,:service_end_date,:place_of_service,:notes,:is_active)
             '''), values).fetchone()
         else:
             row = db.execute(text('''
                 UPDATE care.service_authorizations SET service_code_id=:service_code_id,provider_id=:provider_id,
                     auth_number=:auth_number,authorized_units=:authorized_units,service_start_date=:service_start_date,
-                    service_end_date=:service_end_date,is_active=:is_active
+                    service_end_date=:service_end_date,place_of_service=:place_of_service,notes=:notes,is_active=:is_active
                 OUTPUT INSERTED.id WHERE id=:id AND client_id=:client_id AND agency_id=:agency_id
             '''), values).fetchone()
         if not row:

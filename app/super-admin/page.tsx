@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { HeaderUser } from '@/components/topbar';
+import { AggregatorConnections } from '@/components/aggregator-connections';
 import { useAuth } from '@/components/auth-context';
 import { CreateAgencyWizard as CreateAgencyForm } from '@/components/create-agency-wizard';
 
@@ -253,6 +254,7 @@ export default function SuperAdminPage() {
           </div>
         </section>
 
+        <AggregatorConnections />
         <div className="card">
           <div className="card-header">
             <div>

@@ -22,7 +22,7 @@ function readAggregatorConfig(): AggregatorConfig {
   }
 }
 
-export function AggregatorTabs() {
+export function AggregatorTabs({ compact = false }: { compact?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -46,6 +46,7 @@ export function AggregatorTabs() {
     // Reset status filter and page when switching aggregator tabs
     next.delete('status');
     next.delete('page');
+    next.delete('historyPage');
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
@@ -57,20 +58,23 @@ export function AggregatorTabs() {
   ];
 
   return (
-    <div style={{ display: 'flex', gap: 4, marginBottom: 18 }}>
+    <div role="group" aria-label="Visit source" style={{ display: 'flex', gap: 4, marginBottom: compact ? 0 : 18 }}>
       {tabs.map((tab) => {
         const active = tab.value === '' ? !current : current === tab.value;
         return (
           <button
             key={tab.value}
+            aria-pressed={active}
             onClick={() => setAggregator(tab.value)}
             style={{
-              padding: '7px 16px',
+              padding: compact ? '0 12px' : '7px 16px',
+              height: compact ? 34 : undefined,
+              whiteSpace: 'nowrap',
               borderRadius: 7,
               border: active ? '1px solid #2567a4' : '1px solid var(--line)',
               background: active ? '#2567a4' : 'var(--surface)',
               color: active ? '#fff' : 'var(--text)',
-              fontSize: 13,
+              fontSize: compact ? 12 : 13,
               fontWeight: 600,
               cursor: 'pointer',
               display: 'flex',

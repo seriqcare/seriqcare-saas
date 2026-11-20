@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import styles from './visits.module.css';
 import { ProtectedLayout } from '@/components/protected-layout';
-import { getVisits, type VisitEntry } from '@/lib/queries/timesheets';
+import { getVisits } from '@/lib/queries/timesheets';
+import { LiveVisitRefresh } from '@/components/live-visit-refresh';
 import { VisitSubmitBtn } from '@/components/visit-submit-btn';
 import { QueryTabs } from '@/components/query-tabs';
 import { VisitPeriodSelect } from '@/components/visit-period-select';
@@ -12,7 +14,7 @@ import { AggregatorSubmissionHistory } from '@/components/aggregator-submission-
 
 export const dynamic = 'force-dynamic';
 
-const PER_PAGE = 20;
+const PER_PAGE = 4;
 
 /* ── EVV status maps ──────────────────────────────────── */
 const EVV_COLOR: Record<string, string> = {
@@ -56,31 +58,20 @@ function fmtDate(iso: string) {
   });
 }
 
-function evvBreakdown(items: VisitEntry[]) {
-  const counts: Record<string, number> = { Pending: 0, Verified: 0, Failed: 0, Adjusted: 0, Exempt: 0 };
-  for (const v of items) {
-    if (v.evv_status in counts) counts[v.evv_status]++;
-  }
-  return counts;
-}
-
-function complianceRate(counts: Record<string, number>, total: number) {
-  return total === 0 ? 100 : Math.round(((counts.Verified + counts.Adjusted + counts.Exempt) / total) * 100);
-}
-
 function periodLabel(week: string) {
   if (week === 'last2') return 'Last 2 Weeks';
   if (week === 'last4') return 'Last 4 Weeks';
   return 'This Week';
 }
 
-function buildPageHref(search: string, status: string, week: string, aggregator: string, page: number) {
+function buildPageHref(search: string, status: string, week: string, aggregator: string, page: number, historyPage = 1) {
   const p = new URLSearchParams();
   if (search) p.set('search', search);
   if (status) p.set('status', status);
   if (week !== 'current') p.set('week', week);
   if (aggregator) p.set('aggregator', aggregator);
   if (page > 1) p.set('page', String(page));
+  if (historyPage > 1) p.set('historyPage', String(historyPage));
   const qs = p.toString();
   return qs ? `/visits?${qs}` : '/visits';
 }
@@ -142,33 +133,32 @@ function getTabConfig(aggregator: string) {
 export default async function VisitsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; status?: string; week?: string; page?: string; aggregator?: string }>;
+  searchParams: Promise<{ search?: string; status?: string; week?: string; page?: string; aggregator?: string; historyPage?: string }>;
 }) {
-  const { search = '', status = '', week = 'current', page: pageStr = '1', aggregator = '' } = await searchParams;
+  const { search = '', status = '', week = 'current', page: pageStr = '1', aggregator = '', historyPage: historyPageStr = '1' } = await searchParams;
   const page = Math.max(1, parseInt(pageStr, 10) || 1);
+  const historyPage = Math.max(1, parseInt(historyPageStr, 10) || 1);
+  const historyQuery = { ...(search ? { search } : {}), ...(status ? { status } : {}), week, ...(aggregator ? { aggregator } : {}), page: String(page) };
   const data = await getVisits(page, PER_PAGE, week, search, status, aggregator);
   const { stats, items, total } = data;
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
-  const startRow   = total === 0 ? 0 : (page - 1) * PER_PAGE + 1;
-  const endRow     = Math.min(page * PER_PAGE, total);
+  const startRow   = items.length === 0 ? 0 : (page - 1) * PER_PAGE + 1;
+  const endRow     = items.length === 0 ? 0 : (page - 1) * PER_PAGE + items.length;
 
-  const breakdown = evvBreakdown(items);
-  const evvTotal  = Object.values(breakdown).reduce((a, b) => a + b, 0);
-  const compRate  = complianceRate(breakdown, evvTotal);
-
-  const exceptions = items.filter((v) => v.evv_status === 'Pending' || v.evv_status === 'Failed');
-  const noClock    = items.filter((v) => !v.clock_in || !v.clock_out);
-  const rejected   = items.filter((v) => v.approval_status === 'Denied');
+  const summary = data.summary;
+  const compRate = summary && summary.due > 0 ? Math.round(summary.verified_due / summary.due * 100) : null;
+  const rateColor = compRate == null ? '#8a9aaa' : compRate === 100 ? '#35693c' : '#c4831e';
 
   const tabCfg = getTabConfig(aggregator);
 
   return (
-    <ProtectedLayout>
+    <ProtectedLayout className={styles.workspace}>
+      <LiveVisitRefresh />
       <AggregatorOffBanner />
 
       {/* ── Topbar ─────────────────────────────────────── */}
-      <div className="topbar">
+      <div className={`topbar ${styles.topbar}`}>
         <div>
           <h1 className="page-title">Visits</h1>
           <p className="page-subtitle">{tabCfg.subtitle}</p>
@@ -180,22 +170,21 @@ export default async function VisitsPage({
             </Link>
           )}
           <VisitPeriodSelect current={week} />
-          <button className="btn secondary">Export</button>
+          <AggregatorTabs compact />
         </div>
       </div>
 
       {/* ── Aggregator tabs ─────────────────────────────── */}
-      <AggregatorTabs />
 
       {/* ── Main layout ────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 290px', gap: 16, alignItems: 'start' }}>
+      <div className={styles.layout}>
 
-        <div style={{ display: 'grid', gap: 16 }}>
+        <div className={styles.records}>
 
           {/* Visit records table */}
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 18px 0', borderBottom: '1px solid var(--line-soft)' }}>
-              <div style={{ marginBottom: 12 }}>
+          <div className={`card ${styles.visitRecordsCard}`} style={{ padding: 0, overflow: 'hidden' }}>
+            <div className={styles.visitRecordsHeader} style={{ padding: '10px 12px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <div style={{ marginBottom: 8 }}>
                 <div className="card-title">Visit Records</div>
                 <div className="card-subtitle">{tabCfg.subtitle} · {periodLabel(week)}</div>
               </div>
@@ -206,8 +195,9 @@ export default async function VisitsPage({
               />
             </div>
 
-            <div className="table-scroll">
+            <div className={`table-scroll ${styles.visitTableBody}`}>
               <table>
+                <colgroup>{[7, 12, 11, 9, 8, 9, 6, 6, 5, 12, 15].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
                 <thead>
                   <tr>
                     <th>Visit ID</th>
@@ -251,7 +241,7 @@ export default async function VisitsPage({
                                 {initials(v.employee_name)}
                               </div>
                               <div>
-                                <div className="person-name">{v.employee_name}</div>
+                                <div className="person-name" title={v.employee_name}>{v.employee_name}</div>
                                 <div className="person-meta">{v.employee_code}</div>
                               </div>
                             </div>
@@ -261,7 +251,7 @@ export default async function VisitsPage({
                               <div className="person-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#2567a4' }}>
                                 {initials(v.client_name)}
                               </div>
-                              <div className="person-name">{v.client_name}</div>
+                              <div className="person-name" title={v.client_name}>{v.client_name}</div>
                             </div>
                           </td>
                           <td style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtDate(v.service_date)}</td>
@@ -274,7 +264,7 @@ export default async function VisitsPage({
                           <td>
                             {v.clock_out
                               ? <span style={{ fontSize: 12, fontWeight: 600, color: '#35693c' }}>{v.clock_out}</span>
-                              : <span style={{ fontSize: 12, color: '#d56b6b', fontWeight: 600 }}>Missing</span>
+                              : v.in_progress ? <span className="status in-progress">In Progress</span> : <span style={{ fontSize: 12, color: '#d56b6b', fontWeight: 600 }}>Missing</span>
                             }
                           </td>
                           <td style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
@@ -286,7 +276,7 @@ export default async function VisitsPage({
                           <td style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
                             {v.clock_out_lat != null
                               ? <><div>{v.clock_out_lat.toFixed(4)}</div><div>{v.clock_out_lon?.toFixed(4)}</div></>
-                              : <span style={{ color: '#d56b6b', fontWeight: 600 }}>Missing</span>
+                              : v.in_progress ? <span style={{ color: 'var(--muted)' }}>In Progress</span> : <span style={{ color: '#d56b6b', fontWeight: 600 }}>Missing</span>
                             }
                           </td>
                           <td>
@@ -313,7 +303,7 @@ export default async function VisitsPage({
               </table>
             </div>
 
-            <div className="pagination" style={{ padding: '10px 18px' }}>
+            <div className={`pagination ${styles.tableFooter}`} style={{ padding: '8px 12px' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)' }}>
                 {total === 0 ? 'No records' : `Showing ${startRow}–${endRow} of ${total} visit records`}
                 {search ? ` matching "${search}"` : ''}
@@ -321,23 +311,23 @@ export default async function VisitsPage({
               </div>
               <div className="page-controls">
                 {page > 1
-                  ? <Link href={buildPageHref(search, status, week, aggregator, page - 1)} className="page-btn">‹</Link>
-                  : <div className="page-btn" style={{ opacity: 0.35, cursor: 'default' }}>‹</div>}
+                  ? <Link href={buildPageHref(search, status, week, aggregator, page - 1, historyPage)} className="page-btn" aria-label="Previous visits page">‹</Link>
+                  : <div className="page-btn" aria-disabled="true" style={{ opacity: 0.35, cursor: 'default' }}>‹</div>}
 
                 {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
                   const start = Math.max(1, Math.min(page - 2, totalPages - 4));
                   const p = start + i;
                   if (p < 1 || p > totalPages) return null;
                   return (
-                    <Link key={p} href={buildPageHref(search, status, week, aggregator, p)} className={`page-btn${p === page ? ' active' : ''}`}>
+                    <Link key={p} href={buildPageHref(search, status, week, aggregator, p, historyPage)} className={`page-btn${p === page ? ' active' : ''}`} aria-current={p === page ? 'page' : undefined}>
                       {p}
                     </Link>
                   );
                 })}
 
                 {page < totalPages
-                  ? <Link href={buildPageHref(search, status, week, aggregator, page + 1)} className="page-btn">›</Link>
-                  : <div className="page-btn" style={{ opacity: 0.35, cursor: 'default' }}>›</div>}
+                  ? <Link href={buildPageHref(search, status, week, aggregator, page + 1, historyPage)} className="page-btn" aria-label="Next visits page">›</Link>
+                  : <div className="page-btn" aria-disabled="true" style={{ opacity: 0.35, cursor: 'default' }}>›</div>}
               </div>
             </div>
           </div>
@@ -345,91 +335,23 @@ export default async function VisitsPage({
           <EscCodePanel />
 
           {/* Sandata submission history — shown only when Sandata tab is active or All Visits */}
-          {aggregator !== 'hhax' && <AggregatorSubmissionHistory />}
+          {aggregator !== 'hhax' && <AggregatorSubmissionHistory page={historyPage} query={historyQuery} />}
         </div>
 
         {/* ── Right sidebar ───────────────────────────── */}
-        <div style={{ display: 'grid', gap: 14 }}>
+        <div className={styles.sidebar}>
 
-          {/* Compliance rate */}
           <div className="card">
-            <div className="card-title" style={{ marginBottom: 12 }}>EVV Compliance Rate</div>
+            <div className="card-title" style={{ marginBottom: 12 }}>Visit Verification Rate</div>
             <div style={{ textAlign: 'center', padding: '8px 0 12px' }}>
-              <div style={{ fontSize: 40, fontWeight: 700, color: compRate >= 95 ? '#35693c' : compRate >= 80 ? '#c4831e' : '#d56b6b', lineHeight: 1 }}>
-                {evvTotal === 0 ? '—' : `${compRate}%`}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>This week · {evvTotal} visits</div>
+              <div style={{ fontSize: 40, fontWeight: 700, color: rateColor, lineHeight: 1 }}>{compRate == null ? '\u2014' : `${compRate}%`}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5 }}>{summary?.verified_due ?? 0} / {summary?.due ?? 0} visits verified</div>
             </div>
             <div style={{ height: 8, background: '#e9eef4', borderRadius: 99, overflow: 'hidden', marginBottom: 12 }}>
-              <div style={{ height: '100%', width: `${evvTotal === 0 ? 0 : compRate}%`, background: compRate >= 95 ? '#35693c' : compRate >= 80 ? '#c4831e' : '#d56b6b', borderRadius: 99 }} />
+              <div style={{ height: '100%', width: `${compRate ?? 0}%`, background: rateColor, borderRadius: 99 }} />
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
-              PA-DHS requires ≥95% EVV compliance
-            </div>
-          </div>
-
-          {/* EVV breakdown */}
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 12 }}>EVV Status Breakdown</div>
-            <div className="evv-rows">
-              {[
-                { label: 'Verified',  count: breakdown.Verified,  cls: 'verified'   },
-                { label: 'Adjusted',  count: breakdown.Adjusted,  cls: 'processed'  },
-                { label: 'Exempt',    count: breakdown.Exempt,    cls: 'omit'       },
-                { label: 'Pending',   count: breakdown.Pending,   cls: 'hold'       },
-                { label: 'Failed',    count: breakdown.Failed,    cls: 'incomplete' },
-              ].map(({ label, count, cls }) => (
-                <div key={label} className="evv-row">
-                  <div className="evv-row-label">{label}</div>
-                  <div className="evv-track">
-                    <div className={`evv-fill ${cls}`} style={{ width: `${Math.round((count / (evvTotal || 1)) * 100)}%` }} />
-                  </div>
-                  <div className="evv-row-count">{count}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* EVV alerts */}
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 10 }}>EVV Alerts</div>
-            <div className="alert-list">
-              {exceptions.length > 0 && (
-                <div className="alert-item">
-                  <div className="alert-dot urgent" />
-                  <div className="alert-body">
-                    <div className="alert-title">{exceptions.length} EVV Exception{exceptions.length > 1 ? 's' : ''}</div>
-                    <div className="alert-sub">Pending or Failed EVV validation</div>
-                  </div>
-                </div>
-              )}
-              {noClock.length > 0 && (
-                <div className="alert-item">
-                  <div className="alert-dot warning" />
-                  <div className="alert-body">
-                    <div className="alert-title">{noClock.length} Missing Clock Time{noClock.length > 1 ? 's' : ''}</div>
-                    <div className="alert-sub">Cannot bill until resolved — ESC 902</div>
-                  </div>
-                </div>
-              )}
-              {rejected.length > 0 && (
-                <div className="alert-item">
-                  <div className="alert-dot urgent" />
-                  <div className="alert-body">
-                    <div className="alert-title">{rejected.length} Denied Visit{rejected.length > 1 ? 's' : ''}</div>
-                    <div className="alert-sub">Billing denied — resubmission required</div>
-                  </div>
-                </div>
-              )}
-              {exceptions.length === 0 && noClock.length === 0 && rejected.length === 0 && (
-                <div className="alert-item">
-                  <div className="alert-dot info" />
-                  <div className="alert-body">
-                    <div className="alert-title">All records in good standing</div>
-                    <div className="alert-sub">No EVV exceptions this week</div>
-                  </div>
-                </div>
-              )}
+            <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.6 }}>
+              Active and exempt visits excluded.
             </div>
           </div>
 
@@ -450,49 +372,6 @@ export default async function VisitsPage({
               ))}
             </div>
           </div>
-
-          {/* Aggregator connection status */}
-          {aggregator !== 'hhax' && (
-            <div className="card">
-              <div className="card-title" style={{ marginBottom: 10 }}>Sandata Connection</div>
-              <div style={{ display: 'grid', gap: 8 }}>
-                {[
-                  { label: 'API Endpoint', value: 'api.sandata.com', status: 'ok' },
-                  { label: 'Program',      value: 'PA ODP',          status: 'ok' },
-                  { label: 'Payer',        value: 'PAODP',           status: 'ok' },
-                  { label: 'API Version',  value: 'v1.1',            status: 'ok' },
-                ].map(({ label, value, status }) => (
-                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
-                    <span style={{ color: 'var(--muted)' }}>{label}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: status === 'ok' ? '#35693c' : '#d56b6b', display: 'inline-block' }} />
-                      <span style={{ fontWeight: 600 }}>{value}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {aggregator === 'hhax' && (
-            <div className="card">
-              <div className="card-title" style={{ marginBottom: 10 }}>HHAeXchange Connection</div>
-              <div style={{ display: 'grid', gap: 8 }}>
-                {[
-                  { label: 'API Endpoint', value: 'api.hhaexchange.com', status: 'ok' },
-                  { label: 'Program',      value: 'PA PDA / MA',         status: 'ok' },
-                  { label: 'API Version',  value: 'v2',                  status: 'ok' },
-                ].map(({ label, value, status }) => (
-                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
-                    <span style={{ color: 'var(--muted)' }}>{label}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: status === 'ok' ? '#35693c' : '#d56b6b', display: 'inline-block' }} />
-                      <span style={{ fontWeight: 600 }}>{value}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Quick links */}
           <div className="card">

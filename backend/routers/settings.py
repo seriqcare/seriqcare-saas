@@ -44,6 +44,7 @@ _DEFAULT: dict = {
     "currency": "usd",
     "defaultHourlyRate": "",
     "integration_mode": "SANDATA",
+    "billing_identity": {"npi": "", "taxonomy": "", "ein": "", "medicaid": ""},
     "pay_period": {
         "frequency": "weekly",
         "week_starts_on": "monday",

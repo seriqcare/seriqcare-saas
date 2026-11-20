@@ -34,17 +34,28 @@
   flex: 1;
 }
 
-.authorizations { display: grid; gap: 14px; }
-.authorization { min-width: 0; }
-.authorizationHeading, .authorizationDetails {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.authorizationHeading a { font-size: 12px; font-weight: 600; color: var(--primary); }
-.authorizationDetails { margin-top: 5px; font-size: 11px; color: var(--muted); }
+.panels .trackerCard { display: flex; flex-direction: column; overflow: hidden; padding: 10px 12px; }
+.trackerHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; flex-shrink: 0; }
+.trackerCount { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.trackerTable { table-layout: fixed; width: 100%; border-collapse: collapse; }
+.trackerTable th { padding: 3px 5px; font-size: 9px; text-transform: none; letter-spacing: 0; white-space: nowrap; }
+.trackerTable td { padding: 4px 5px; font-size: 11px; vertical-align: middle; }
+.trackerTable th:first-child { width: 41%; }
+.trackerTable th:nth-child(2) { width: 22%; }
+.trackerTable th:nth-child(3) { width: 18%; }
+.trackerTable th:last-child { width: 19%; }
+.trackerTable td:not(:first-child) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trackerTable a { display: block; color: var(--primary); font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.trackerService { color: var(--muted); font-size: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.trackerTotal { font-size: 10px; color: var(--muted); }
+.trackerExpiry { font-size: 10px; }
+.trackerWarning, .trackerExpiry[data-warning='true'], .trackerTable td[data-warning='true'] { color: var(--warning-text); }
+.trackerWarning { display: block; font-size: 9px; line-height: 11px; }
+.trackerPagination { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; color: var(--muted); font-size: 10px; flex-shrink: 0; }
+.trackerPagination > div { display: flex; align-items: center; gap: 8px; }
+.trackerPagination button { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--primary); font: inherit; cursor: pointer; }
+.trackerPagination button:disabled { opacity: .4; cursor: default; }
+.trackerTable .authorizationProgress { height: 3px; margin-top: 3px; }
 .authorizationProgress {
   display: block;
   width: 100%;

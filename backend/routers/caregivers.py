@@ -161,6 +161,7 @@ def get_caregivers(
                 SELECT
                     e.id,
                     e.employee_code,
+                    CONVERT(VARCHAR(33), e.created_at, 126) AS created_at,
                     e.first_name + ' ' + e.last_name                           AS name,
                     'DSP'                                                      AS role,
                     CASE WHEN e.is_active = 1 THEN 'Active' ELSE 'Inactive' END AS status,
@@ -198,7 +199,7 @@ def get_caregivers(
                     )                                                          AS hours_this_week
                 FROM care.employees e
                 {where_clause}
-                ORDER BY e.is_active DESC, e.first_name, e.last_name
+                ORDER BY e.created_at DESC, e.id DESC
                 OFFSET :offset ROWS FETCH NEXT :per_page ROWS ONLY
             """),
             params,
@@ -212,6 +213,7 @@ def get_caregivers(
                 role=str(r.role),
                 status=str(r.status),
                 hire_date=r.hire_date,
+                created_at=getattr(r, 'created_at', None),
                 clients_assigned=int(r.clients_assigned or 0),
                 visits_this_week=int(r.visits_this_week or 0),
                 hours_this_week=round(float(r.hours_this_week or 0), 2),

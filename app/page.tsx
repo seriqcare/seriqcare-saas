@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AuthorizationTracker } from '@/components/authorization-tracker';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { DashboardEvvPanels } from '@/components/dashboard-evv-panels';
 import { getCaregiverUtilization, getDashboardAuthorizations, getDashboardMetrics } from '@/lib/queries/dashboard';
@@ -144,47 +144,7 @@ export default async function DashboardPage() {
           </div>
         </div>
       {/* ── Row 3 — Revenue pipeline (placeholder) + Caregiver utilization ── */}
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <div className="card-title">Authorization Tracker</div>
-              <div className="card-subtitle">Units used vs. authorized per client and service</div>
-            </div>
-          </div>
-          {authorizationResult.error ? (
-            <div role="alert">{authorizationResult.error}</div>
-          ) : authorizationResult.data?.length === 0 ? (
-            <div className="coming-soon-wrap">No active authorizations for this agency.</div>
-          ) : (
-            <div className={styles.authorizations}>
-              {authorizationResult.data?.map(auth => {
-                const percent = auth.authorized_units > 0 ? auth.used_units / auth.authorized_units * 100 : 0;
-                const days = auth.days_until_expiry;
-                const expired = days !== null && days < 0;
-                const expiry = days === null ? 'No expiry date' : expired
-                  ? `Expired ${Math.abs(days)} days ago` : days === 0 ? 'Expires today'
-                  : `Expiring in ${days} ${days === 1 ? 'day' : 'days'}`;
-                return (
-                  <div key={auth.auth_id} className={styles.authorization}>
-                    <div className={styles.authorizationHeading}>
-                      <Link href={`/clients/${auth.client_id}`}>{auth.client_name}</Link>
-                      <span className={`status-pill${expired ? ' flag' : days !== null && days <= 30 ? ' pending' : ''}`}>{expiry}</span>
-                    </div>
-                    <div className={styles.authorizationDetails}>
-                      <span>{[auth.service_code, auth.auth_number].filter(Boolean).join(' · ') || 'Service authorization'}</span>
-                      <span>{fmt(auth.used_units)} / {fmt(auth.authorized_units)} units{auth.authorized_units > 0 ? ` · ${Math.round(percent)}%` : ''}</span>
-                    </div>
-                    <progress className={styles.authorizationProgress} max={auth.authorized_units > 0 ? auth.authorized_units : 1}
-                      value={Math.max(0, Math.min(auth.used_units, auth.authorized_units))}
-                      aria-label={`${auth.client_name}, ${auth.service_code || 'authorization'}: ${auth.used_units} of ${auth.authorized_units} units used`}
-                      data-warning={percent >= 90 || expired} />
-                    {auth.authorized_units <= 0 && <div className={styles.authorizationDetails}>No units authorized</div>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <AuthorizationTracker items={authorizationResult.data ?? []} error={authorizationResult.error} />
 
         <div className="card">
           <div className="card-header">

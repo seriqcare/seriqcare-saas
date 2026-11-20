@@ -3,7 +3,8 @@ Pydantic v2 response schemas for the SeriqCare FastAPI backend.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Literal
+from datetime import date
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,7 @@ class CaregiverUtilization(BaseModel):
 
 
 class DashboardAuthorization(BaseModel):
+    unassigned_visits: int = 0
     auth_id: int
     client_id: int
     client_name: str
@@ -86,6 +88,7 @@ class ClientStats(BaseModel):
 
 
 class ClientSummary(BaseModel):
+    created_at: Optional[str] = None
     id: int
     client_code: str
     name: str
@@ -101,6 +104,9 @@ class ClientSummary(BaseModel):
 
 
 class ClientDetail(BaseModel):
+    middle_name: Optional[str] = None
+    care_plan_start_date: Optional[str] = None
+    place_of_service: Optional[str] = None
     id: int
     client_code: str
     first_name: str
@@ -141,6 +147,8 @@ class ClientDetail(BaseModel):
 
 
 class ClientPayerItem(BaseModel):
+    payer_name: Optional[str] = None
+    managed_care_plan: Optional[str] = None
     id: int
     waiver_id: Optional[int] = None
     payer_id: str
@@ -153,6 +161,8 @@ class ClientPayerItem(BaseModel):
 
 
 class ClientAuthItem(BaseModel):
+    place_of_service: Optional[str] = None
+    notes: Optional[str] = None
     id: int
     service_code_id: Optional[int] = None
     provider_id: Optional[int] = None
@@ -327,7 +337,25 @@ class VisitStats(BaseModel):
     evv_exceptions: int
 
 
+class VisitVerificationSummary(BaseModel):
+    total: int = 0
+    due: int = 0
+    verified_due: int = 0
+    in_progress: int = 0
+    overdue: int = 0
+    exempt: int = 0
+    verified: int = 0
+    adjusted: int = 0
+    pending: int = 0
+    failed: int = 0
+    exceptions: int = 0
+    missing_clock: int = 0
+    rejected: int = 0
+
+
 class VisitEntry(BaseModel):
+    in_progress: bool = False
+    overdue: bool = False
     edit_locked: bool = False
     sandata_submission_count: int = 0
     id: int
@@ -349,6 +377,7 @@ class VisitEntry(BaseModel):
 
 
 class VisitsResponse(BaseModel):
+    summary: Optional[VisitVerificationSummary] = None
     total: int
     page: int
     per_page: int
@@ -428,6 +457,13 @@ class CaregiverCreateResponse(BaseModel):
     sandata_message: Optional[str] = None
 
 
+class BillingIdentity(BaseModel):
+    npi: str = Field(default="", max_length=10, pattern=r"^(\d{10})?$")
+    taxonomy: str = Field(default="", max_length=10)
+    ein: str = Field(default="", max_length=20)
+    medicaid: str = Field(default="", max_length=50)
+
+
 class AgencySettings(BaseModel):
     agencyName: Optional[str] = None
     email: Optional[str] = None
@@ -438,6 +474,7 @@ class AgencySettings(BaseModel):
     currency: Optional[str] = None
     defaultHourlyRate: Optional[str] = None
     integration_mode: Optional[str] = None  # 'SANDATA' | 'HHAX'
+    billing_identity: Optional[BillingIdentity] = None
 
 
 class AgencySettingsResponse(BaseModel):
@@ -517,6 +554,7 @@ class CaregiverStats(BaseModel):
 
 
 class CaregiverSummary(BaseModel):
+    created_at: Optional[str] = None
     id: int
     employee_code: str
     name: str
@@ -537,6 +575,9 @@ class CaregiversResponse(BaseModel):
 
 
 class ClientUpdateRequest(BaseModel):
+    middle_name: Optional[str] = None
+    care_plan_start_date: Optional[str] = None
+    place_of_service: Optional[Literal['12', '99']] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     date_of_birth: Optional[str] = None
@@ -721,6 +762,30 @@ class ClientUpdateResponse(BaseModel):
 
 
 class ClientCreateRequest(BaseModel):
+    primary_language: Optional[str] = Field(default=None, max_length=50)
+    emergency_contact_name: Optional[str] = Field(default=None, max_length=200)
+    emergency_contact_phone: Optional[str] = Field(default=None, max_length=20)
+    emergency_contact_relationship: Optional[str] = Field(default=None, max_length=50)
+    payer_name: Optional[str] = Field(default=None, max_length=100)
+    payer_id: Optional[str] = Field(default=None, max_length=20)
+    managed_care_plan: Optional[str] = Field(default=None, max_length=100)
+    waiver_id: Optional[int] = Field(default=None, gt=0)
+    insurance_effective_date: Optional[date] = None
+    insurance_end_date: Optional[date] = None
+    service_code_id: Optional[int] = Field(default=None, gt=0)
+    provider_id: Optional[int] = Field(default=None, gt=0)
+    authorized_units: Optional[float] = Field(default=None, gt=0, le=99999999.99, allow_inf_nan=False)
+    authorization_start: Optional[date] = None
+    authorization_end: Optional[date] = None
+    auth_number: Optional[str] = Field(default=None, max_length=50)
+    auth_notes: Optional[str] = Field(default=None, max_length=2000)
+    place_of_service: Literal['12', '99'] = '12'
+    care_coordinator: Optional[str] = Field(default=None, max_length=200)
+    physician: Optional[str] = Field(default=None, max_length=200)
+    level_of_care: Optional[str] = Field(default=None, max_length=50)
+    care_plan_start_date: Optional[date] = None
+    care_plan_review_date: Optional[date] = None
+    care_plan_notes: Optional[str] = Field(default=None, max_length=4000)
     first_name: str
     last_name: str
     middle_name: Optional[str] = None

@@ -33,7 +33,7 @@ function harness(storage = new Map(), username = 'coordinator', kind = 'clients'
           return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }];
         },
         useEffect(fn) { if (!mounted) effects.push(fn); },
-        useRef: () => ({ current: null }),
+        useRef(initial) { const index = cursor++; if (!(index in states)) states[index] = { current: initial }; return states[index]; },
       };
       if (name === 'next/navigation') return { useRouter: () => ({ push(path) { navigation.push(path); }, refresh() { navigation.push('refresh'); } }) };
       if (name === '../actions') return {
@@ -43,6 +43,10 @@ function harness(storage = new Map(), username = 'coordinator', kind = 'clients'
       if (name.endsWith('auth-context')) return { useAuth: () => ({
         user: { agency_id: 7, username },
         apiFetch: async (url, init) => {
+          if (url.endsWith('/intake-options')) return { ok: true, json: async () => ({
+            services: [{ id: 1, code: 'W7076', description: 'Companion Care', unit_type: '15 min' }],
+            providers: [{ id: 2, name: 'Agency provider' }], waivers: [{ id: 3, code: 'OBRA', name: 'OBRA' }],
+          }) };
           requests.push({ url, payload: JSON.parse(init.body) });
           return { status: 201, json: async () => ({ message: 'Client saved.' }) };
         },
@@ -65,6 +69,7 @@ function harness(storage = new Map(), username = 'coordinator', kind = 'clients'
   render();
   return {
     storage, requests, navigation,
+    async ready() { await new Promise(resolve => setImmediate(resolve)); render(); },
     find: predicate => nodes().find(predicate),
     async click(label) {
       const button = nodes().find(n => n.type === 'button' && text(n) === label);
@@ -113,17 +118,31 @@ test('draft restores across page visits and is scoped to its user', async () => 
 
 test('completing all steps submits once and clears the saved draft', async () => {
   const h = harness();
+  await h.ready();
   fillPersonal(h);
+  h.fill('Middle Name', 'Jane');
+  h.fill('Primary Language', 'Spanish');
+  h.fill('Contact Name', 'Guardian');
+  h.fill('Relationship', 'Other');
   await h.click('Continue to Insurance & Payer');
+  h.fill('Waiver Program', '3');
+  h.fill('Managed Care Plan', 'Community HealthChoices (CHC)');
   h.fill('Medicaid ID (MA Number)', '1234567890');
   await h.click('Continue to Service Authorization');
-  h.fill('Service Code', 'W7076');
+  h.fill('Service Code', '1');
+  h.fill('Authorized Units', '100');
+  h.fill('Authorization Number', 'AUTH-TEST');
+  h.fill('Notes', 'Authorization details');
   h.fill('Authorization Start', '2026-11-13');
   h.fill('Authorization End', '2026-11-12');
   await h.click('Continue to Care Plan');
   assert.deepEqual(h.visibleStep(), ['sec-auth']);
   h.fill('Authorization End', '2026-12-13');
   await h.click('Continue to Care Plan');
+  h.fill('Care Coordinator', 'Coordinator');
+  h.fill('Plan Start Date', '2026-11-01');
+  h.fill('Review Date', '2026-12-01');
+  h.fill('Initial Goals & Notes', 'Support daily activities');
   await h.click('Continue to Documents');
   assert.deepEqual(h.visibleStep(), ['sec-documents']);
   await h.click('Save Draft');
@@ -132,6 +151,7 @@ test('completing all steps submits once and clears the saved draft', async () =>
   assert.equal(h.requests[0].payload.first_name, 'Evelyn');
   assert.equal(h.requests[0].payload.medicaid_id, '1234567890');
   assert.equal(h.requests[0].payload.procedure_code, 'W7076');
+  for (const [key, value] of Object.entries({ middle_name: 'Jane', primary_language: 'Spanish', emergency_contact_name: 'Guardian', emergency_contact_relationship: 'Other', waiver_id: 3, managed_care_plan: 'Community HealthChoices (CHC)', service_code_id: 1, provider_id: 2, authorized_units: 100, auth_number: 'AUTH-TEST', auth_notes: 'Authorization details', care_coordinator: 'Coordinator', care_plan_start_date: '2026-11-01', care_plan_review_date: '2026-12-01', care_plan_notes: 'Support daily activities' })) assert.equal(h.requests[0].payload[key], value, key);
   assert.equal(h.storage.size, 0);
   assert.deepEqual(h.navigation, ['invalidate clients', '/clients']);
 });

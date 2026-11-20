@@ -27,11 +27,14 @@ function initials(name: string) {
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string }>;
+  searchParams: Promise<{ search?: string; page?: string }>;
 }) {
-  const { search = '' } = await searchParams;
-  const data = await getClients(1, 20, '', search);
+  const { search = '', page: pageParam = '1' } = await searchParams;
+  const page = Math.max(1, Math.floor(Number(pageParam) || 1));
+  const data = await getClients(page, 20, '', search);
   const { stats, items, total } = data;
+  const totalPages = Math.max(1, Math.ceil(total / 20));
+  const pageHref = (value: number) => `/clients?${new URLSearchParams({ ...(search ? { search } : {}), page: String(value) })}`;
 
   return (
     <ProtectedLayout>
@@ -73,6 +76,7 @@ export default async function ClientsPage({
               <thead>
                 <tr>
                   <th>Client</th>
+                  <th>Created Date</th>
                   <th>Status</th>
                   <th>Service Type</th>
                   <th>Primary Caregiver</th>
@@ -83,7 +87,7 @@ export default async function ClientsPage({
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', color: '#999', padding: '36px 0' }}>
+                    <td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '36px 0' }}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>
                         {search ? `No clients matching "${search}"` : 'No clients found'}
                       </div>
@@ -113,6 +117,7 @@ export default async function ClientsPage({
                           </div>
                         </Link>
                       </td>
+                      <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
                       <td>
                         <span className={`status ${STATUS_CLS[c.status] ?? ''}`}>{c.status}</span>
                       </td>
@@ -147,12 +152,11 @@ export default async function ClientsPage({
           </div>
 
           <div className="pagination" style={{ padding: '10px 18px' }}>
-            <div>Showing 1–{items.length} of {total} clients{search ? ` matching "${search}"` : ''}</div>
+            <div>Showing {items.length ? (page - 1) * 20 + 1 : 0}–{items.length ? (page - 1) * 20 + items.length : 0} of {total} clients{search ? ` matching "${search}"` : ''}</div>
             <div className="page-controls">
-              <div className="page-btn">‹</div>
-              <div className="page-btn active">1</div>
-              <div className="page-btn">2</div>
-              <div className="page-btn">›</div>
+              {page > 1 && <Link className="page-btn" href={pageHref(page - 1)} aria-label="Previous page">Previous</Link>}
+              <span className="page-btn active" aria-current="page">{page}</span>
+              {page < totalPages && <Link className="page-btn" href={pageHref(page + 1)} aria-label="Next page">Next</Link>}
             </div>
           </div>
         </div>

@@ -105,7 +105,7 @@ function toTaskDraft(task: ClientCareTask, index: number): ClientCareTaskInput {
 
 /* ── Editable field ───────────────────────────────────── */
 function EField({
-  label, fieldKey, vals, onChange, editing, placeholder = 'Not on file', textarea = false,
+  label, fieldKey, vals, onChange, editing, placeholder = 'Not on file', textarea = false, options, type = 'text',
 }: {
   label: string;
   fieldKey: string;
@@ -114,6 +114,8 @@ function EField({
   editing: boolean;
   placeholder?: string;
   textarea?: boolean;
+  options?: string[];
+  type?: string;
 }) {
   const val = vals[fieldKey] ?? '';
   const isEmpty = !val || val === 'Not on file';
@@ -121,7 +123,7 @@ function EField({
     <div className="info-field">
       <div className="info-label">{label}</div>
       {editing ? (
-        textarea ? (
+        options ? (<select className="form-select" value={val} onChange={e => onChange(fieldKey, e.target.value)}><option value="">Select...</option>{options.map(option => <option key={option} value={option}>{option}</option>)}</select>) : textarea ? (
           <textarea
             className="form-textarea"
             value={val}
@@ -132,6 +134,7 @@ function EField({
         ) : (
           <input
             className="form-input"
+            type={type}
             value={val}
             placeholder={placeholder}
             onChange={(e) => onChange(fieldKey, e.target.value)}
@@ -147,15 +150,16 @@ function EField({
 
 /* ── Tab: Profile ─────────────────────────────────────── */
 function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
+  const revision = useClientTabRevision();
   const router = useRouter();
-  const { apiFetch } = useAuth();
+  const { user, apiFetch } = useAuth();
   const init = {
     name:       c.name ?? '',
     client_code: c.client_code ?? '',
     age:        c.age != null ? String(c.age) : '',
     dob:        '',
     gender:     '',
-    language:   'English',
+    language:   '',
     phone:      '',
     email:      '',
     address:    c.city && c.state ? `${c.city}, ${c.state}` : '',
@@ -180,6 +184,26 @@ function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
       next_visit: c.next_visit ?? '', account_status: c.status ?? '', care_plan_status: c.care_plan_status ?? '',
     }));
   }, [c]);
+
+  const [detailError, setDetailError] = useState('');
+  useEffect(() => {
+    if (!user?.token || Object.values(editing).some(Boolean)) return;
+    let alive = true;
+    getClientDetail(clientId, user.token).then(detail => {
+      if (!alive) return;
+      if (!detail) throw new Error('Could not load client details.');
+      setDetailError('');
+      setVals(current => ({ ...current,
+        name: [detail.first_name, detail.middle_name, detail.last_name].filter(Boolean).join(' '),
+        dob: detail.date_of_birth ?? '', gender: detail.gender ?? '', language: detail.primary_language ?? '',
+        phone: detail.phone ?? '', email: detail.email ?? '',
+        address: [detail.street_address, detail.city, detail.state, detail.zip_code].filter(Boolean).join(', '),
+        emergency_contact: detail.emergency_contact_name ?? '', emergency_phone: detail.emergency_contact_phone ?? '',
+        relationship: detail.emergency_contact_relationship ?? '',
+      }));
+    }).catch(error => { if (alive) setDetailError(error.message); });
+    return () => { alive = false; };
+  }, [clientId, user?.token, revision]);
 
   function set(k: string, v: string) { setVals((p) => ({ ...p, [k]: v })); }
   function startEdit(section: string) { setEditing((p) => ({ ...p, [section]: true })); }
@@ -213,7 +237,8 @@ function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
     if (section === 'personal' && vals.name) {
       const parts = vals.name.trim().split(' ');
       payload.first_name = parts[0];
-      payload.last_name = parts.slice(1).join(' ') || parts[0];
+      payload.last_name = parts.at(-1) || parts[0];
+      payload.middle_name = parts.slice(1, -1).join(' ');
       delete payload.name;
     }
     try {
@@ -229,6 +254,7 @@ function ProfileTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
 
   return (
     <div>
+      {detailError && <p role="alert">{detailError}</p>}
       <EditSection title="Personal Information" editing={!!editing.personal} onEdit={() => startEdit('personal')} onSave={() => save('personal')}>
         <div className="detail-grid">
           <EField label="Full Name"       fieldKey="name"        vals={vals} onChange={set} editing={!!editing.personal} />
@@ -295,7 +321,7 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
     state:       detail.state ?? 'PA',
     zip:         detail.zip_code ?? '',
     county:      detail.county ?? '',
-    pos:         '12 — Home',
+    pos:         detail.place_of_service ?? '',
     ssn4:        detail.ssn_last4 ? `****${detail.ssn_last4.slice(-4)}` : '****',
     medicaid_id: detail.medicaid_id ?? '',
     dob:         detail.date_of_birth ?? '',
@@ -311,7 +337,7 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
     rep_payee:   detail.representative_payee ?? '',
   } : {
     street: '', city: c.city ?? '', state: c.state ?? 'PA', zip: '',
-    county: '', pos: '12 — Home',
+    county: '', pos: '',
     ssn4: '****', medicaid_id: '', dob: '', gender: '',
     race: '', marital: '', language: '', language2: '',
     comm_needs: '',
@@ -335,6 +361,7 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
       state: 'state',
       zip: 'zip_code',
       county: 'county',
+      pos: 'place_of_service',
     };
     const personalFieldMap: Record<string, string> = {
       medicaid_id: 'medicaid_id',
@@ -402,7 +429,7 @@ function AddressTab({ c, clientId }: { c: ClientSummary; clientId: number }) {
           <EField label="State"           fieldKey="state"   vals={localVals} onChange={set} editing={!!editing.addr} />
           <EField label="ZIP Code"        fieldKey="zip"     vals={localVals} onChange={set} editing={!!editing.addr} />
           <EField label="County"          fieldKey="county"  vals={localVals} onChange={set} editing={!!editing.addr} />
-          <EField label="Place of Service" fieldKey="pos"   vals={localVals} onChange={set} editing={!!editing.addr} />
+          <EField label="Place of Service" fieldKey="pos"   vals={localVals} onChange={set} editing={!!editing.addr} options={['12', '99']} />
         </div>
       </EditSection>
 
@@ -439,7 +466,7 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
   const [detail, setDetail] = useState<ClientDetail | null>(null);
   const [vals, setVals] = useState<Record<string, string>>({
     coordinator: '', physician: '', level_of_care: '',
-    reviewed: '', next_review: '', notes: '',
+    plan_start: '', next_review: '', notes: '',
   });
   const [editing, setEditing] = useState<Record<string, boolean>>({});
   const [careTasks, setCareTasks] = useState<ClientCareTask[]>([]);
@@ -461,8 +488,8 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
           coordinator:   d.care_coordinator ?? '',
           physician:     d.physician ?? '',
           level_of_care: d.level_of_care ?? '',
-          reviewed:      d.care_plan_review_date ?? '',
-          next_review:   '',
+          plan_start:    d.care_plan_start_date ?? '',
+          next_review:   d.care_plan_review_date ?? '',
           notes:         d.care_plan_notes ?? '',
         });
       })
@@ -478,7 +505,8 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
       if (vals.coordinator)   payload.care_coordinator       = vals.coordinator;
       if (vals.physician)     payload.physician              = vals.physician;
       if (vals.level_of_care) payload.level_of_care          = vals.level_of_care;
-      if (vals.reviewed)      payload.care_plan_review_date  = vals.reviewed;
+      payload.care_plan_start_date = vals.plan_start;
+      payload.care_plan_review_date = vals.next_review;
     }
     if (s === 'notes') payload.care_plan_notes = vals.notes;
     setCarePlanSaving(true);
@@ -630,8 +658,8 @@ function CarePlanTabInner({ clientId }: { clientId: number }) {
           <EField label="Care Coordinator"   fieldKey="coordinator"   vals={vals} onChange={set} editing={!!editing.overview} />
           <EField label="Attending Physician" fieldKey="physician"    vals={vals} onChange={set} editing={!!editing.overview} />
           <EField label="Level of Care"      fieldKey="level_of_care" vals={vals} onChange={set} editing={!!editing.overview} />
-          <EField label="Last Reviewed"      fieldKey="reviewed"      vals={vals} onChange={set} editing={!!editing.overview} />
-          <EField label="Next Review Due"    fieldKey="next_review"   vals={vals} onChange={set} editing={!!editing.overview} />
+          <EField label="Plan Start Date"    fieldKey="plan_start" type="date" vals={vals} onChange={set} editing={!!editing.overview} />
+          <EField label="Next Review Due"    fieldKey="next_review" type="date" vals={vals} onChange={set} editing={!!editing.overview} />
         </div>
       </EditSection>
 

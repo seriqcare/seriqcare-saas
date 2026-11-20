@@ -17,7 +17,18 @@ const SECTIONS = [
 ];
 
 
+type IntakeOptions = {
+  services: { id: number; code: string; modifier: string | null; description: string; unit_type: string }[];
+  providers: { id: number; name: string }[];
+  waivers: { id: number; code: string; name: string }[];
+};
+
 type FormState = {
+  serviceCodeId: string;
+  providerId: string;
+  authNumber: string;
+  insuranceStart: string;
+  insuranceEnd: string;
   firstName: string;
   middleName: string;
   lastName: string;
@@ -56,6 +67,7 @@ type FormState = {
 };
 
 const EMPTY: FormState = {
+  serviceCodeId: '', providerId: '', authNumber: '', insuranceStart: '', insuranceEnd: '',
   firstName: '', middleName: '', lastName: '',
   dateOfBirth: '', gender: '', language: 'English',
   ssnLast4: '', phone: '', email: '',
@@ -77,6 +89,25 @@ export default function NewClientPage() {
   const [error,   setError]   = useState('');
   const [success, setSuccess] = useState('');
   const [completed, setCompleted] = useState<string[]>([]);
+  const [options, setOptions] = useState<IntakeOptions>({ services: [], providers: [], waivers: [] });
+  const [optionsError, setOptionsError] = useState('');
+  const [optionsLoading, setOptionsLoading] = useState(true);
+  const [optionsRetry, setOptionsRetry] = useState(0);
+  const savePending = useRef(false);
+  const selectedService = options.services.find(service => String(service.id) === form.serviceCodeId);
+  useEffect(() => {
+    let active = true;
+    setOptionsLoading(true); setOptionsError('');
+    apiFetch('/api/clients/intake-options', { cache: 'no-store' }).then(async response => {
+      if (!response.ok) throw new Error('Could not load services, providers, and waiver programs.');
+      const data: IntakeOptions = await response.json();
+      if (!active) return;
+      setOptions(data);
+      if (data.providers.length === 1) setForm(current => ({ ...current, providerId: current.providerId || String(data.providers[0].id) }));
+    }).catch(error => { if (active) setOptionsError(error.message); }).finally(() => { if (active) setOptionsLoading(false); });
+    return () => { active = false; };
+  }, [apiFetch, optionsRetry, user?.agency_id]);
+
   const headingRef = useRef<HTMLDivElement>(null);
   const draftKey = user ? `seriqcare-client-draft:${user.agency_id}:${user.username}` : null;
   const activeIndex = SECTIONS.findIndex(section => section.id === activeSection);
@@ -121,9 +152,16 @@ export default function NewClientPage() {
       if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return 'Enter a valid email address.';
     }
     if (id === 'insurance' && !/^\d{10}$/.test(form.medicaidId.replace(/\D/g, ''))) return 'Medicaid ID must be exactly 10 digits.';
+    if (id === 'insurance' && form.waiverProgram && !options.waivers.some(waiver => String(waiver.id) === form.waiverProgram)) return 'Select a current waiver program.';
+    if (id === 'insurance' && form.insuranceStart && form.insuranceEnd && form.insuranceEnd < form.insuranceStart) return 'Insurance end must be on or after its effective date.';
     if (id === 'auth') {
-      if (!form.procedureCode) return 'Service code is required.';
+      if (optionsLoading) return 'Please wait for service options to load.';
+      if (optionsError) return optionsError;
+      if (!form.procedureCode || !options.services.some(service => String(service.id) === form.serviceCodeId)) return 'Service code is required.';
       if (form.authStart && form.authEnd && form.authEnd < form.authStart) return 'Authorization end must be on or after the start date.';
+      const hasAuthorization = Boolean(form.authorizedUnits || form.authStart || form.authEnd || form.authNotes || form.authNumber);
+      if (hasAuthorization && (!form.authorizedUnits || Number(form.authorizedUnits) <= 0 || !form.authStart || !form.authEnd || !form.providerId)) return 'Complete authorization units, dates, and provider, or leave authorization details blank to add later.';
+
     }
     if (id === 'careplan' && form.planStart && form.reviewDate && form.reviewDate < form.planStart) return 'Review date must be on or after the plan start date.';
     return '';
@@ -173,6 +211,8 @@ export default function NewClientPage() {
       if (message) { setError(message); scrollTo(section.id); return; }
     }
 
+    if (savePending.current) return;
+    savePending.current = true;
     setSaving(true);
 
     const payload = {
@@ -191,6 +231,30 @@ export default function NewClientPage() {
       state:          form.state || 'PA',
       zip_code:       form.zipCode.trim() || null,
       procedure_code: form.procedureCode || null,
+      primary_language: form.language.trim() || null,
+      emergency_contact_name: form.emergencyName.trim() || null,
+      emergency_contact_relationship: form.emergencyRelationship || null,
+      emergency_contact_phone: form.emergencyPhone.trim() || null,
+      payer_name: form.payer || null,
+      managed_care_plan: form.managedCarePlan || null,
+      waiver_id: form.waiverProgram ? Number(form.waiverProgram) : null,
+      insurance_effective_date: form.insuranceStart || null,
+      insurance_end_date: form.insuranceEnd || null,
+      service_code_id: form.serviceCodeId ? Number(form.serviceCodeId) : null,
+      provider_id: (form.authorizedUnits || form.authStart || form.authEnd || form.authNotes || form.authNumber) && form.providerId ? Number(form.providerId) : null,
+      auth_number: form.authNumber.trim() || null,
+      authorized_units: form.authorizedUnits ? Number(form.authorizedUnits) : null,
+      authorization_start: form.authStart || null,
+      authorization_end: form.authEnd || null,
+      place_of_service: form.placeOfService,
+      auth_notes: form.authNotes.trim() || null,
+      care_coordinator: form.coordinator.trim() || null,
+      physician: form.physician.trim() || null,
+      level_of_care: form.levelOfCare || null,
+      care_plan_start_date: form.planStart || null,
+      care_plan_review_date: form.reviewDate || null,
+      care_plan_notes: form.planNotes.trim() || null,
+
     };
     try {
       const res = await apiFetch('/api/clients', {
@@ -217,10 +281,11 @@ export default function NewClientPage() {
       }
 
       const body = await res.json().catch(() => ({}));
-      setError(body.detail ?? 'Failed to save client.');
+      setError(typeof body.detail === 'string' ? body.detail : Array.isArray(body.detail) ? body.detail.map((item: { msg: string }) => item.msg).join(' ') : 'Failed to save client.');
     } catch {
       setError('Could not reach server.');
     }
+    savePending.current = false;
     setSaving(false);
   }
 
@@ -416,10 +481,7 @@ export default function NewClientPage() {
                 <label className="form-label">Waiver Program</label>
                 <select className="form-select" value={form.waiverProgram} onChange={set('waiverProgram')}>
                   <option value="">Select…</option>
-                  <option value="ODP-CW">Consolidated Waiver (ODP)</option>
-                  <option value="ODP-PFDS">P/FDS Waiver (ODP)</option>
-                  <option value="ODP-CLW">Community Living Waiver (ODP)</option>
-                  <option value="OBRA">OBRA Waiver</option>
+                  {options.waivers.map(waiver => <option key={waiver.id} value={waiver.id}>{waiver.name}</option>)}
                 </select>
               </div>
               <div className="form-field">
@@ -431,6 +493,10 @@ export default function NewClientPage() {
                 </select>
               </div>
             </div>
+            <div className="form-row col2">
+              <div className="form-field"><label className="form-label">Insurance Effective Date</label><input className="form-input" type="date" value={form.insuranceStart} onChange={set('insuranceStart')} /></div>
+              <div className="form-field"><label className="form-label">Insurance End Date</label><input className="form-input" type="date" value={form.insuranceEnd} onChange={set('insuranceEnd')} /></div>
+            </div>
           </div>
 
           {/* ── 3. Service Authorization ──────────── */}
@@ -441,22 +507,27 @@ export default function NewClientPage() {
             <div className="form-row col2">
               <div className="form-field">
                 <label className="form-label">Service Code <span className="req">*</span></label>
-                <select className="form-select" value={form.procedureCode} onChange={set('procedureCode')}>
-                  <option value="">Select service…</option>
-                  <option value="W7076">W7076 — Companion Services</option>
-                  <option value="W7060">W7060 — In-Home &amp; Community Support</option>
-                  <option value="W9494">W9494 — Respite (Unlicensed)</option>
-                  <option value="W9495">W9495 — Respite Day (eff. 7/1/2025)</option>
-                  <option value="S5130">S5130 — Homemaker</option>
-                  <option value="W9783">W9783 — Community Support AAW</option>
+                <select className="form-select" value={form.serviceCodeId} disabled={optionsLoading || !!optionsError} onChange={event => {
+                  const service = options.services.find(item => String(item.id) === event.target.value);
+                  setForm(current => ({ ...current, serviceCodeId: event.target.value, procedureCode: service?.code || '' }));
+                }}>
+                  <option value="">Select service...</option>
+                  {options.services.map(service => <option key={service.id} value={service.id}>{service.code}{service.modifier ? ` - ${service.modifier}` : ''} - {service.description}</option>)}
                 </select>
+
               </div>
               <div className="form-field">
-                <label className="form-label">Authorized Units (15-min)</label>
+                <label className="form-label">Authorized Units</label>
                 <input className="form-input" type="number" placeholder="e.g. 1040" min={1}
                   value={form.authorizedUnits} onChange={set('authorizedUnits')} />
               </div>
             </div>
+            <div className="form-row col2">
+              <div className="form-field"><label className="form-label">Provider</label><select className="form-select" value={form.providerId} onChange={set('providerId')} disabled={optionsLoading}><option value="">Select provider...</option>{options.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></div>
+              <div className="form-field"><label className="form-label">Authorization Number</label><input className="form-input" value={form.authNumber} onChange={set('authNumber')} maxLength={50} /></div>
+            </div>
+            <p className="form-hint">{selectedService ? `Units are measured in ${selectedService.unit_type}. ` : ''}Authorization details may be added later. If entered now, complete units, dates, and provider.</p>
+            {optionsError && <div role="alert" className="error-text">{optionsError} <button type="button" className="btn secondary sm" onClick={() => setOptionsRetry(value => value + 1)}>Retry</button></div>}
             <div className="form-row col3">
               <div className="form-field">
                 <label className="form-label">Authorization Start</label>
@@ -480,7 +551,7 @@ export default function NewClientPage() {
               <div className="form-field">
                 <label className="form-label">Notes</label>
                 <textarea className="form-textarea" placeholder="Additional authorization notes…"
-                  value={form.authNotes} onChange={set('authNotes')} />
+                  maxLength={2000} value={form.authNotes} onChange={set('authNotes')} />
               </div>
             </div>
           </div>
@@ -529,7 +600,7 @@ export default function NewClientPage() {
                 <label className="form-label">Initial Goals &amp; Notes</label>
                 <textarea className="form-textarea" style={{ minHeight: 100 }}
                   placeholder="Describe initial care goals, support needs, and any special requirements…"
-                  value={form.planNotes} onChange={set('planNotes')} />
+                  maxLength={4000} value={form.planNotes} onChange={set('planNotes')} />
               </div>
             </div>
           </div>

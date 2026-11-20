@@ -172,13 +172,13 @@ def clock_in(
                 s.service_code_id,
                 s.agency_id,
                 (
-                    SELECT TOP 1 sa.id
+                    SELECT CASE WHEN COUNT(*) = 1 THEN MAX(sa.id) END
                     FROM   care.service_authorizations sa
                     WHERE  sa.client_id       = s.client_id
                       AND  sa.agency_id       = s.agency_id
                       AND  sa.service_code_id = s.service_code_id
                       AND  sa.is_active       = 1
-                    ORDER  BY sa.service_end_date DESC
+                      AND :service_date BETWEEN sa.service_start_date AND sa.service_end_date
                 ) AS auth_id
             FROM care.schedules s
             JOIN care.clients c ON c.id = s.client_id AND c.agency_id = s.agency_id
@@ -187,7 +187,7 @@ def clock_in(
               AND s.employee_id = :employee_id AND s.agency_id = :agency_id
               AND s.status <> 'Cancelled'
         """),
-        {"sid": req.schedule_id, "employee_id": current_user.employee_id, "agency_id": current_user.agency_id},
+        {"sid": req.schedule_id, "employee_id": current_user.employee_id, "agency_id": current_user.agency_id, "service_date": _parse_iso(req.timestamp).date()},
     ).fetchone()
 
     if schedule is None:

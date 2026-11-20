@@ -15,6 +15,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -36,6 +37,33 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Overview
 # ---------------------------------------------------------------------------
+
+@router.get('/connections')
+def get_connections(current_user: User = Depends(require_role('super_admin'))):
+    """Server configuration only; never return credentials or call vendors."""
+    from backend.services import sandata, hhax
+
+    def endpoint(value):
+        try:
+            parts = urlsplit(value)
+            if parts.scheme not in ('http', 'https') or not parts.hostname:
+                return None
+            host = f'[{parts.hostname}]' if ':' in parts.hostname else parts.hostname
+            if parts.port:
+                host += f':{parts.port}'
+            return urlunsplit((parts.scheme, host, parts.path, '', ''))
+        except ValueError:
+            return None
+
+    return [
+        {'name': 'Sandata Connection', 'mode': 'live' if sandata.is_live() else 'simulate',
+         'endpoint': endpoint(sandata._API_URL if sandata.is_live() else sandata._SIMULATOR_URL),
+         'credentials_configured': bool(sandata._API_KEY) if sandata.is_live() else None},
+        {'name': 'HHAeXchange Connection', 'mode': 'live' if hhax.is_live() else 'simulate',
+         'endpoint': endpoint(hhax._BASE_URL) if hhax.is_live() else None,
+         'credentials_configured': bool(hhax._CLIENT_ID and hhax._CLIENT_SECRET) if hhax.is_live() else None},
+    ]
+
 
 @router.get("/overview")
 def get_overview(

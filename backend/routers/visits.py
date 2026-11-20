@@ -4,6 +4,8 @@ Returns paginated visit / timesheet records with EVV and approval status.
 """
 from __future__ import annotations
 from backend.services.visit_lock import visit_edit_locked_sql
+from backend.services.visit_verification import summary_query, timing_expressions
+from backend.services.evv_reporting import SCHEDULE_JOIN_SQL, clock_out_grace_minutes
 
 from datetime import date, datetime, timedelta
 
@@ -13,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from db.database import get_db
 from backend.auth.dependencies import get_agency_scope, AgencyScope
-from backend.schemas import VisitEntry, VisitStats, VisitsResponse, VisitSubmitResponse, VisitFixRequest, VisitFixResponse, VisitValidateResponse, VisitValidateAllResponse
+from backend.schemas import VisitEntry, VisitStats, VisitVerificationSummary, VisitsResponse, VisitSubmitResponse, VisitFixRequest, VisitFixResponse, VisitValidateResponse, VisitValidateAllResponse
 from backend.routers.aggregator import _do_submit, get_aggregator_scope
 from backend.services.evv_validation import validate_and_gate
 from backend.services.timezone import UTC, now_eastern_naive
@@ -73,7 +75,7 @@ def get_visits(
         # ------------------------------------------------------------------
         # Resolve week filter
         # ------------------------------------------------------------------
-        today = date.today()
+        today = now_eastern_naive().date()
         current_monday = today - timedelta(days=today.weekday())
         current_sunday = current_monday + timedelta(days=6)
 
@@ -141,8 +143,8 @@ def get_visits(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM care.visits v
-                JOIN care.employees e        ON v.employee_id = e.id
-                JOIN care.clients   c        ON v.client_id   = c.id
+                JOIN care.employees e        ON v.employee_id = e.id AND e.agency_id = v.agency_id
+                JOIN care.clients   c        ON v.client_id   = c.id AND c.agency_id = v.agency_id
                 LEFT JOIN care.visit_evv                ev ON ev.visit_id = v.id
                 LEFT JOIN care.visit_billing            vb ON vb.visit_id = v.id
                 LEFT JOIN care.visit_integration_status vi ON vi.visit_id = v.id
@@ -161,7 +163,7 @@ def get_visits(
                 f"""
                 SELECT
                     ISNULL(SUM(
-                        CASE WHEN ev.call_out_datetime IS NOT NULL
+                        CASE WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
                         THEN DATEDIFF(
                             MINUTE,
                             COALESCE(ev.adj_in_datetime,  ev.call_in_datetime),
@@ -172,8 +174,8 @@ def get_visits(
                     COUNT(CASE WHEN vb.approval_status = 'Approved' THEN 1 END) AS approved,
                     COUNT(CASE WHEN ev.evv_status IN ('Pending', 'Failed') THEN 1 END) AS evv_exceptions
                 FROM care.visits v
-                JOIN care.employees e        ON v.employee_id = e.id
-                JOIN care.clients   c        ON v.client_id   = c.id
+                JOIN care.employees e        ON v.employee_id = e.id AND e.agency_id = v.agency_id
+                JOIN care.clients   c        ON v.client_id   = c.id AND c.agency_id = v.agency_id
                 LEFT JOIN care.visit_evv                ev ON ev.visit_id = v.id
                 LEFT JOIN care.visit_billing            vb ON vb.visit_id = v.id
                 LEFT JOIN care.visit_integration_status vi ON vi.visit_id = v.id
@@ -190,6 +192,16 @@ def get_visits(
             evv_exceptions=int(stats_row.evv_exceptions or 0),
         )
 
+        # Operational summary is independent of table pagination/search/status filters.
+        summary_row = db.execute(text(summary_query(scope.sql_filter('v'))), scope.bind({
+            'week_start': week_start_str, 'week_end': week_end_str,
+            'clock_grace': clock_out_grace_minutes(),
+        })).fetchone()
+        summary = VisitVerificationSummary(**{field: int(getattr(summary_row, field, 0) or 0)
+                                             for field in VisitVerificationSummary.model_fields})
+        overdue_sql, active_sql = timing_expressions()
+        params['clock_grace'] = clock_out_grace_minutes()
+
         # ------------------------------------------------------------------
         # Main visit list
         # ------------------------------------------------------------------
@@ -198,6 +210,8 @@ def get_visits(
                 f"""
                 SELECT
                     v.id,
+                    CASE WHEN {active_sql} THEN 1 ELSE 0 END AS in_progress,
+                    CASE WHEN {overdue_sql} THEN 1 ELSE 0 END AS overdue,
                     e.first_name + ' ' + e.last_name AS employee_name,
                     e.employee_code,
                     c.first_name + ' ' + c.last_name AS client_name,
@@ -205,7 +219,7 @@ def get_visits(
                     FORMAT(COALESCE(ev.adj_in_datetime,  ev.call_in_datetime),  'hh:mm tt') AS clock_in,
                     FORMAT(COALESCE(ev.adj_out_datetime, ev.call_out_datetime), 'hh:mm tt') AS clock_out,
                     ISNULL(
-                        CASE WHEN ev.call_out_datetime IS NOT NULL
+                        CASE WHEN COALESCE(ev.adj_out_datetime, ev.call_out_datetime) IS NOT NULL
                         THEN DATEDIFF(
                             MINUTE,
                             COALESCE(ev.adj_in_datetime,  ev.call_in_datetime),
@@ -223,11 +237,12 @@ def get_visits(
                     CASE WHEN {visit_edit_locked_sql()} THEN 1 ELSE 0 END AS edit_locked,
                     vi.hhax_status
                 FROM care.visits v
-                JOIN care.employees e        ON v.employee_id = e.id
-                JOIN care.clients   c        ON v.client_id   = c.id
+                JOIN care.employees e        ON v.employee_id = e.id AND e.agency_id = v.agency_id
+                JOIN care.clients   c        ON v.client_id   = c.id AND c.agency_id = v.agency_id
                 LEFT JOIN care.visit_evv                ev ON ev.visit_id = v.id
                 LEFT JOIN care.visit_billing            vb ON vb.visit_id = v.id
                 LEFT JOIN care.visit_integration_status vi ON vi.visit_id = v.id
+                {SCHEDULE_JOIN_SQL}
                 WHERE {where_sql}
                 ORDER BY v.service_date DESC, ev.call_in_datetime DESC
                 OFFSET :offset ROWS FETCH NEXT :per_page ROWS ONLY
@@ -239,6 +254,8 @@ def get_visits(
         items: list[VisitEntry] = [
             VisitEntry(
                 id=int(r.id),
+                in_progress=bool(getattr(r, 'in_progress', False)),
+                overdue=bool(getattr(r, 'overdue', False)),
                 employee_name=str(r.employee_name),
                 employee_code=str(r.employee_code),
                 client_name=str(r.client_name),
@@ -261,6 +278,7 @@ def get_visits(
         ]
 
         return VisitsResponse(
+            summary=summary,
             total=total,
             page=page,
             per_page=per_page,

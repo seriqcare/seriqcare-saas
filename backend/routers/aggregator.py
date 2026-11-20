@@ -466,7 +466,7 @@ def get_submissions(
                 JOIN care.clients  c ON v.client_id  = c.id AND c.agency_id = v.agency_id
                 JOIN care.employees e ON v.employee_id = e.id AND e.agency_id = v.agency_id
                 {where}
-                ORDER BY s.submitted_at DESC
+                ORDER BY s.submitted_at DESC, s.id DESC
                 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
             """),
             params,

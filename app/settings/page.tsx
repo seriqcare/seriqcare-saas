@@ -2,11 +2,13 @@
 
 import { FormEvent, ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { BillingIdentitySettings } from '@/components/billing-identity-settings';
+import { SettingsDialog } from '@/components/settings-dialog';
+import panelStyles from '@/components/settings-panels.module.css';
 import settingsStyles from './settings.module.css';
 import { PayrollSettingsPanel } from '@/components/payroll-settings-panel';
 import { ServiceRatesSettings } from '@/components/service-rates-settings';
 import { ProtectedLayout } from '@/components/protected-layout';
-import { HeaderUser } from '@/components/topbar';
 import { useAuth } from '@/components/auth-context';
 import { AGGREGATOR_SANDATA_KEY, AGGREGATOR_HHAX_KEY } from '@/components/aggregator-off-banner';
 
@@ -320,7 +322,6 @@ export default function SettingsPage() {
               <h1 className="page-title">Settings</h1>
               <p className="page-subtitle">Loading agency settings...</p>
             </div>
-            <div className="top-actions"><HeaderUser /></div>
           </div>
         </ProtectedLayout>
       }
@@ -349,19 +350,16 @@ function SettingsPageContent() {
   const [agencySaving, setAgencySaving] = useState(false);
   const [agencyMsg, setAgencyMsg] = useState('');
   const [agencyErr, setAgencyErr] = useState('');
+  const agencyPending = useRef(false);
+  const [agencyLoading, setAgencyLoading] = useState(true);
+  const [agencyLoadTick, setAgencyLoadTick] = useState(0);
 
   /* Notifications */
   const [notifs, setNotifs] = useState<NotifSettings>(DEFAULT_NOTIFS);
 
-  /* Billing — provider identity */
-  const [billing, setBilling] = useState({ npi: '', taxonomy: '', ein: '', medicaid: '' });
-  const [billingMsg, setBillingMsg] = useState('');
-
-  /* Billing — Sandata */
-  const [sandata, setSandata] = useState({ providerId: '', apiMode: 'simulate', apiKey: '' });
-  const [sandataMsg, setSandataMsg] = useState('');
-
   /* Security — Portal (self-service change password) */
+  const [securityEditor, setSecurityEditor] = useState<'portal' | 'mobile' | null>(null);
+  const securityPending = useRef(false);
   const [portal, setPortal] = useState<PortalForm>({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalMsg, setPortalMsg] = useState('');
@@ -392,6 +390,12 @@ function SettingsPageContent() {
     return () => { active = false; };
   }, [tab, apiFetch]);
 
+  useEffect(() => {
+    if (!portalMsg && !mobileMsg) return;
+    const id = window.setTimeout(() => { setPortalMsg(''); setMobileMsg(''); }, 4000);
+    return () => window.clearTimeout(id);
+  }, [portalMsg, mobileMsg]);
+
   /* Aggregator — Sandata */
   const [sandataCfg,       setSandataCfg]       = useState<SandataForm>(DEFAULT_SANDATA);
   const [sandataAggSaving, setSandataAggSaving] = useState(false);
@@ -414,10 +418,19 @@ function SettingsPageContent() {
   const [showADPModal, setShowADPModal]         = useState(false);
   const [showSandataModal, setShowSandataModal] = useState(false);
   const [showHhaxModal, setShowHhaxModal]       = useState(false);
+  const sandataSnapshot = useRef<SandataForm>(DEFAULT_SANDATA);
+  const hhaxSnapshot = useRef<HhaxForm>(DEFAULT_HHAX);
+  function openSandata() { sandataSnapshot.current = { ...sandataCfg }; setSandataAggErr(''); setShowSandataModal(true); }
+  function openHhax() { hhaxSnapshot.current = { ...hhaxCfg }; setHhaxAggErr(''); setShowHhaxModal(true); }
+  function closeSandata() { if (!sandataAggSaving) { setSandataCfg({ ...sandataSnapshot.current }); setSandataAggErr(''); setShowSandataModal(false); } }
+  function closeHhax() { if (!hhaxAggSaving) { setHhaxCfg({ ...hhaxSnapshot.current }); setHhaxAggErr(''); setShowHhaxModal(false); } }
+
 
   useEffect(() => {
+    setAgencyLoading(true);
+    setAgencyErr('');
     apiFetch(`${API_BASE}/api/settings/agency`)
-      .then(r => r.ok ? r.json() : null)
+      .then(r => { if (!r.ok) throw new Error('Could not load agency information.'); return r.json(); })
       .then(data => {
         if (!data) return;
         const nextAgency: AgencyForm = {
@@ -433,8 +446,9 @@ function SettingsPageContent() {
         setAgency(nextAgency);
         setAgencySnapshot(nextAgency);
       })
-      .catch(() => {});
-  }, [apiFetch]);
+      .catch(() => setAgencyErr('Could not load agency information. Please retry.'))
+      .finally(() => setAgencyLoading(false));
+  }, [apiFetch, agencyLoadTick]);
 
   useEffect(() => {
     try {
@@ -461,15 +475,17 @@ function SettingsPageContent() {
     setSandataAggErr(''); setSandataAggMsg(''); setSandataAggSaving(true);
     try {
       if (sandataCfg.sandata_enabled) {
-        if (!sandataCfg.sandata_medicaid_provider_id.trim()) { setSandataAggErr('Medicaid Provider ID is required.'); setSandataAggSaving(false); return; }
-        if (!sandataCfg.sandata_user_id.trim())              { setSandataAggErr('User ID is required.');              setSandataAggSaving(false); return; }
-        if (!sandataCfg.sandata_password.trim())             { setSandataAggErr('Password is required.');             setSandataAggSaving(false); return; }
+        if (!sandataCfg.sandata_medicaid_provider_id.trim()) { setSandataAggErr('Medicaid Provider ID is required.'); setSandataAggSaving(false); return false; }
+        if (!sandataCfg.sandata_user_id.trim())              { setSandataAggErr('User ID is required.');              setSandataAggSaving(false); return false; }
+        if (!sandataCfg.sandata_password.trim())             { setSandataAggErr('Password is required.');             setSandataAggSaving(false); return false; }
       }
       localStorage.setItem(AGGREGATOR_SANDATA_KEY, JSON.stringify(sandataCfg));
       setSandataAggMsg(sandataCfg.sandata_enabled ? 'Sandata saved and enabled.' : 'Sandata settings saved (disabled).');
       setTimeout(() => setSandataAggMsg(''), 3500);
+      return true;
     } catch {
       setSandataAggErr('Failed to save settings.');
+      return false;
     } finally {
       setSandataAggSaving(false);
     }
@@ -478,15 +494,17 @@ function SettingsPageContent() {
     setHhaxAggErr(''); setHhaxAggMsg(''); setHhaxAggSaving(true);
     try {
       if (hhaxCfg.hhax_enabled) {
-        if (!hhaxCfg.hhax_provider_id.trim()) { setHhaxAggErr('Provider ID is required.'); setHhaxAggSaving(false); return; }
-        if (!hhaxCfg.hhax_user_id.trim())     { setHhaxAggErr('User ID is required.');     setHhaxAggSaving(false); return; }
-        if (!hhaxCfg.hhax_password.trim())    { setHhaxAggErr('Password is required.');    setHhaxAggSaving(false); return; }
+        if (!hhaxCfg.hhax_provider_id.trim()) { setHhaxAggErr('Provider ID is required.'); setHhaxAggSaving(false); return false; }
+        if (!hhaxCfg.hhax_user_id.trim())     { setHhaxAggErr('User ID is required.');     setHhaxAggSaving(false); return false; }
+        if (!hhaxCfg.hhax_password.trim())    { setHhaxAggErr('Password is required.');    setHhaxAggSaving(false); return false; }
       }
       localStorage.setItem(AGGREGATOR_HHAX_KEY, JSON.stringify(hhaxCfg));
       setHhaxAggMsg(hhaxCfg.hhax_enabled ? 'HHAeXchange saved and enabled.' : 'HHAeXchange settings saved (disabled).');
       setTimeout(() => setHhaxAggMsg(''), 3500);
+      return true;
     } catch {
       setHhaxAggErr('Failed to save settings.');
+      return false;
     } finally {
       setHhaxAggSaving(false);
     }
@@ -505,7 +523,10 @@ function SettingsPageContent() {
   };
 
   /* ── Agency handlers ───────────────────────────────────────────────────── */
-  const saveAgency = async () => {
+  const saveAgency = async (event: FormEvent) => {
+    event.preventDefault();
+    if (agencyPending.current) return;
+    agencyPending.current = true;
     setAgencyErr(''); setAgencyMsg(''); setAgencySaving(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/settings/agency`, {
@@ -513,18 +534,19 @@ function SettingsPageContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(agency),
       });
-      if (res.ok || res.status === 404) {
+      if (res.ok) {
         setAgencySnapshot(agency);
         setAgencyEditing(false);
         setAgencyMsg('Changes saved.');
         setTimeout(() => setAgencyMsg(''), 3000);
       } else {
         const b = await res.json().catch(() => ({}));
-        setAgencyErr(b?.detail ?? 'Failed to save.');
+        setAgencyErr(typeof b?.detail === 'string' ? b.detail : 'Failed to save agency information.');
       }
     } catch {
       setAgencyErr('Cannot connect to server.');
     } finally {
+      agencyPending.current = false;
       setAgencySaving(false);
     }
   };
@@ -534,6 +556,8 @@ function SettingsPageContent() {
     setPortalErr(''); setPortalMsg('');
     if (portal.newPassword !== portal.confirmPassword) { setPortalErr('Passwords do not match.'); return; }
     if (portal.newPassword.length < 8) { setPortalErr('Password must be at least 8 characters.'); return; }
+    if (securityPending.current) return;
+    securityPending.current = true;
     setPortalBusy(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/auth/change-password`, {
@@ -542,6 +566,7 @@ function SettingsPageContent() {
         body: JSON.stringify({ current_password: portal.currentPassword, new_password: portal.newPassword }),
       });
       if (res.status === 204) {
+        setSecurityEditor(null);
         setPortalMsg('Password updated successfully.');
         setPortal({ currentPassword: '', newPassword: '', confirmPassword: '' });
       } else {
@@ -549,7 +574,7 @@ function SettingsPageContent() {
         setPortalErr(b?.detail ?? 'Failed to update password.');
       }
     } catch { setPortalErr('Cannot connect to server.'); }
-    finally { setPortalBusy(false); }
+    finally { securityPending.current = false; setPortalBusy(false); }
   };
 
   const handleMobileReset = async (e: FormEvent) => {
@@ -558,6 +583,8 @@ function SettingsPageContent() {
     if (!mobile.username || !mobileCaregivers.some(caregiver => caregiver.username === mobile.username)) { setMobileErr('Select a caregiver with an active mobile account.'); return; }
     if (mobile.newPassword !== mobile.confirmPassword) { setMobileErr('Passwords do not match.'); return; }
     if (mobile.newPassword.length < 8) { setMobileErr('Password must be at least 8 characters.'); return; }
+    if (securityPending.current) return;
+    securityPending.current = true;
     setMobileBusy(true);
     try {
       const res = await apiFetch(`${API_BASE}/api/auth/admin-reset-password`, {
@@ -566,6 +593,7 @@ function SettingsPageContent() {
         body: JSON.stringify({ username: mobile.username, new_password: mobile.newPassword, user_type: 'mobile' }),
       });
       if (res.status === 204) {
+        setSecurityEditor(null);
         setMobileMsg(`Password reset for ${mobile.username}.`);
         setMobile({ username: '', newPassword: '', confirmPassword: '' });
       } else {
@@ -573,7 +601,7 @@ function SettingsPageContent() {
         setMobileErr(b?.detail ?? 'Failed to reset password.');
       }
     } catch { setMobileErr('Cannot connect to server.'); }
-    finally { setMobileBusy(false); }
+    finally { securityPending.current = false; setMobileBusy(false); }
   };
 
 
@@ -590,7 +618,6 @@ function SettingsPageContent() {
           <h1 className="page-title">Settings</h1>
           <p className="page-subtitle">Agency configuration, billing details, and security controls.</p>
         </div>
-        <div className="top-actions"><HeaderUser /></div>
       </div>
 
       <div className={settingsStyles.tabs} role="tablist" aria-label="Settings" onKeyDown={event => {
@@ -618,71 +645,51 @@ function SettingsPageContent() {
 
       {/* ══ GENERAL ════════════════════════════════════════════════════════ */}
       {tab === 'general' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="form-section-card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-              <div>
-                <div className="form-section-heading">Agency Information</div>
-                <div className="form-section-sub">Your agency details and contact information.</div>
-              </div>
-              {!agencyEditing && (
-                <button className="btn secondary" style={{ fontSize: 12, height: 32, padding: '0 14px' }}
-                  onClick={() => { setAgencySnapshot(agency); setAgencyEditing(true); setAgencyErr(''); setAgencyMsg(''); }}>
-                  Edit
-                </button>
-              )}
+        <div className={panelStyles.page}>
+          <div className={panelStyles.heading}><h2>General</h2><p className={panelStyles.subtitle}>Manage your agency's information and registered account.</p></div>
+          <section className={settingsStyles.agencyCard} aria-label="Agency Information">
+            <header className={settingsStyles.agencyCardHeader}>
+              <div><h3>Agency Information</h3><p>Business details associated with your agency.</p></div>
+              <button className="btn secondary" disabled={agencyLoading || !!agencyErr} onClick={() => { setAgency({ ...agencySnapshot }); setAgencyEditing(true); setAgencyErr(''); setAgencyMsg(''); }}>Edit</button>
+            </header>
+            {agencyLoading ? <p role="status" className={settingsStyles.agencyLoading}>Loading agency information...</p> : <div>
+              <section className={settingsStyles.agencySection} aria-labelledby="agency-details-heading">
+                <div className={settingsStyles.agencySectionHeading}><h4 id="agency-details-heading">Agency details</h4><p>Your agency's name and identifier.</p></div>
+                <dl className={settingsStyles.agencyRows}>
+                  <div><dt>Agency name</dt><dd className={settingsStyles.agencyBusinessName}>{agencySnapshot.agencyName || <span className={settingsStyles.emptyValue}>Not configured</span>}</dd></div>
+                  {user?.agency_code && <div><dt>Agency code</dt><dd className={settingsStyles.agencyCode}>{user.agency_code}</dd></div>}
+                </dl>
+              </section>
+              <section className={settingsStyles.agencySection} aria-labelledby="agency-contact-heading">
+                <div className={settingsStyles.agencySectionHeading}><h4 id="agency-contact-heading">Contact details</h4><p>Contact information for your agency.</p></div>
+                <dl className={settingsStyles.agencyRows}>
+                  <div><dt>Phone</dt><dd>{agencySnapshot.phone || <span className={settingsStyles.emptyValue}>Not added</span>}</dd></div>
+                  <div><dt>Website</dt><dd>{agencySnapshot.website || <span className={settingsStyles.emptyValue}>Not added</span>}</dd></div>
+                  <div><dt>Address</dt><dd>{agencySnapshot.address || <span className={settingsStyles.emptyValue}>Not added</span>}</dd></div>
+                </dl>
+              </section>
+              <section className={settingsStyles.agencySection} aria-labelledby="agency-registration-heading">
+                <div className={settingsStyles.agencySectionHeading}><h4 id="agency-registration-heading">Registration</h4><p>Account information managed by Super Admin.</p></div>
+                <dl className={settingsStyles.agencyRows}>
+                  <div><dt>Registered email</dt><dd><div className={settingsStyles.agencyEmail}>{agencySnapshot.email || <span className={settingsStyles.emptyValue}>Not configured</span>}<span className={settingsStyles.readOnly}>Read only</span></div><p className={settingsStyles.agencyEmailNote}>Used to sign in. Contact Super Admin to request a change.</p></dd></div>
+                </dl>
+              </section>
+            </div>}
+            {agencyErr && !agencyEditing && <div role="alert" className={`error-text ${settingsStyles.agencyLoading}`}>{agencyErr} <button className="btn secondary sm" onClick={() => setAgencyLoadTick(tick => tick + 1)}>Retry</button></div>}
+          </section>
+          {agencyMsg && <div role="status" className={panelStyles.toast}>{agencyMsg}</div>}
+          {agencyEditing && <SettingsDialog title="Edit agency information" description="Update your agency's profile. The registered login email cannot be changed here." onSubmit={saveAgency} busy={agencySaving} error={agencyErr} onClose={() => { if (!agencySaving) { setAgency({ ...agencySnapshot }); setAgencyEditing(false); setAgencyErr(''); } }}>
+            <div className={panelStyles.fields}>
+              <label><span className={panelStyles.label}>Agency name *</span><input required value={agency.agencyName} onChange={e => setAgency(a => ({ ...a, agencyName: e.target.value }))} /></label>
+              <label><span className={panelStyles.label}>Registered email</span><input type="email" value={agency.email} disabled aria-describedby="agency-email-help" /><span id="agency-email-help" className={settingsStyles.fieldHint}>Used for login. Contact Super Admin to request a change.</span></label>
+              <label><span className={panelStyles.label}>Phone</span><input type="tel" value={agency.phone} onChange={e => setAgency(a => ({ ...a, phone: e.target.value }))} /></label>
+              <label><span className={panelStyles.label}>Website</span><input type="url" placeholder="https://" value={agency.website} onChange={e => setAgency(a => ({ ...a, website: e.target.value }))} /></label>
+              <label className={panelStyles.full}><span className={panelStyles.label}>Address</span><textarea rows={2} value={agency.address} onChange={e => setAgency(a => ({ ...a, address: e.target.value }))} /></label>
             </div>
-
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">Agency Name</div>
-                <input className="input" value={agency.agencyName} disabled={!agencyEditing}
-                  onChange={e => setAgency(a => ({ ...a, agencyName: e.target.value }))} />
-              </div>
-              <div className="info-field">
-                <div className="info-label">Email</div>
-                <input className="input" type="email" value={agency.email} disabled aria-label="Registered agency email" aria-describedby="agency-email-help" />
-                <span id="agency-email-help" className={settingsStyles.fieldHint}>Registered login email. Contact Super Admin to request a change.</span>
-              </div>
-            </div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">Phone</div>
-                <input className="input" value={agency.phone} disabled={!agencyEditing}
-                  onChange={e => setAgency(a => ({ ...a, phone: e.target.value }))} />
-              </div>
-              <div className="info-field">
-                <div className="info-label">Website</div>
-                <input className="input" type="url" placeholder="https://…" value={agency.website} disabled={!agencyEditing}
-                  onChange={e => setAgency(a => ({ ...a, website: e.target.value }))} />
-              </div>
-            </div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr' }}>
-              <div className="info-field">
-                <div className="info-label">Address</div>
-                <input className="input" value={agency.address} disabled={!agencyEditing}
-                  onChange={e => setAgency(a => ({ ...a, address: e.target.value }))} />
-              </div>
-            </div>
-
-            {agencyErr && <ErrorBanner msg={agencyErr} />}
-            {agencyMsg && <SuccessBanner msg={agencyMsg} />}
-
-            {agencyEditing && (
-              <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-                <button className="btn" style={{ minWidth: 100 }} onClick={saveAgency} disabled={agencySaving}>
-                  {agencySaving ? 'Saving…' : 'Save'}
-                </button>
-                <button className="btn secondary" onClick={() => { setAgency(agencySnapshot); setAgencyEditing(false); setAgencyErr(''); }}>
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
+          </SettingsDialog>}
         </div>
       )}
 
-      {/* ══ NOTIFICATIONS ══════════════════════════════════════════════════ */}
       {tab === 'notifications' && (
         <div className="form-section-card" style={{ maxWidth: 640 }}>
           <div className="form-section-heading">Email Notifications</div>
@@ -711,186 +718,69 @@ function SettingsPageContent() {
 
       {/* ══ BILLING ════════════════════════════════════════════════════════ */}
       {tab === 'billing' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className={panelStyles.page}>
+          <div className={panelStyles.heading}><h2>Billing</h2><p className={panelStyles.subtitle}>Manage service rates, provider identifiers, and aggregator configuration.</p></div>
           <ServiceRatesSettings key={user?.agency_id ?? 'no-agency'} />
-          <div className="form-section-card">
-            <div className="form-section-heading">Provider Billing Identity</div>
-            <div className="form-section-sub">NPI, taxonomy codes, and payer identifiers used for claim submission.</div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">National Provider ID (NPI)</div>
-                <input className="input" placeholder="10-digit NPI" value={billing.npi}
-                  onChange={e => setBilling(b => ({ ...b, npi: e.target.value }))} />
-              </div>
-              <div className="info-field">
-                <div className="info-label">Taxonomy Code</div>
-                <input className="input" placeholder="e.g. 251E00000X" value={billing.taxonomy}
-                  onChange={e => setBilling(b => ({ ...b, taxonomy: e.target.value }))} />
-              </div>
-            </div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">Federal Tax ID (EIN)</div>
-                <input className="input" placeholder="XX-XXXXXXX" value={billing.ein}
-                  onChange={e => setBilling(b => ({ ...b, ein: e.target.value }))} />
-              </div>
-              <div className="info-field">
-                <div className="info-label">Medicaid Provider Number</div>
-                <input className="input" placeholder="PA Medicaid #" value={billing.medicaid}
-                  onChange={e => setBilling(b => ({ ...b, medicaid: e.target.value }))} />
-              </div>
-            </div>
-            {billingMsg && <SuccessBanner msg={billingMsg} />}
-            <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
-              <button className="btn" style={{ minWidth: 120 }}
-                onClick={() => { setBillingMsg('Billing details saved.'); setTimeout(() => setBillingMsg(''), 3000); }}>
-                Save Changes
-              </button>
-              <button className="btn secondary">Cancel</button>
-            </div>
-          </div>
-
-          <div className="form-section-card">
-            <div className="form-section-heading">Sandata Aggregator Credentials</div>
-            <div className="form-section-sub">Required for submitting EVV visit records to the PA ODP aggregator.</div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">Sandata Provider ID</div>
-                <input className="input" placeholder="Assigned by Sandata" value={sandata.providerId}
-                  onChange={e => setSandata(s => ({ ...s, providerId: e.target.value }))} />
-              </div>
-              <div className="info-field">
-                <div className="info-label">API Mode</div>
-                <select className="input" value={sandata.apiMode}
-                  onChange={e => setSandata(s => ({ ...s, apiMode: e.target.value }))}>
-                  <option value="simulate">Simulate (dev / staging)</option>
-                  <option value="live">Live (production)</option>
-                </select>
-              </div>
-            </div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr' }}>
-              <div className="info-field">
-                <div className="info-label">API Key</div>
-                <input className="input" type="password" placeholder="••••••••••••••••"
-                  value={sandata.apiKey}
-                  onChange={e => setSandata(s => ({ ...s, apiKey: e.target.value }))} />
-              </div>
-            </div>
-            {sandataMsg && <SuccessBanner msg={sandataMsg} />}
-            <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
-              <button className="btn" style={{ minWidth: 140 }}
-                onClick={() => { setSandataMsg('Credentials saved.'); setTimeout(() => setSandataMsg(''), 3000); }}>
-                Save Credentials
-              </button>
-              <button className="btn secondary">Test Connection</button>
-            </div>
+          <div className={`${panelStyles.grid} ${panelStyles.equalCards}`}>
+            <BillingIdentitySettings key={user?.agency_id ?? 'no-agency'} />
+            {(showSandata || showHhax) && <>
+              {showSandata && <section className={panelStyles.card}>
+                <div className={panelStyles.cardHeader}><div><h3>Sandata Aggregator</h3><p className={panelStyles.subtitle}>ODP / Waiver services</p></div><button className="btn secondary" onClick={openSandata}>Configure</button></div>
+                <dl className={panelStyles.summary}><div><dt>Browser configuration</dt><dd><span className={panelStyles.badge}>{sandataCfg.sandata_enabled ? 'Enabled' : 'Disabled'}</span></dd></div><div><dt>Mode</dt><dd>{sandataCfg.sandata_mode === 'live' ? 'Live' : 'Simulation'}</dd></div><div><dt>Provider ID</dt><dd>{sandataCfg.sandata_medicaid_provider_id || 'Not configured'}</dd></div><div><dt>Credentials</dt><dd>{sandataCfg.sandata_password ? 'Password saved in this browser' : 'Not configured'}</dd></div></dl>
+                <p className={panelStyles.hint}>These preferences are stored in this browser. Server submission credentials are configured separately.</p>
+              </section>}
+              {showHhax && <section className={panelStyles.card}>
+                <div className={panelStyles.cardHeader}><div><h3>HHAeXchange Aggregator</h3><p className={panelStyles.subtitle}>PDA / MA services</p></div><button className="btn secondary" onClick={openHhax}>Configure</button></div>
+                <dl className={panelStyles.summary}><div><dt>Browser configuration</dt><dd><span className={panelStyles.badge}>{hhaxCfg.hhax_enabled ? 'Enabled' : 'Disabled'}</span></dd></div><div><dt>Mode</dt><dd>{hhaxCfg.hhax_mode === 'production' ? 'Production' : 'Test'}</dd></div><div><dt>Provider ID</dt><dd>{hhaxCfg.hhax_provider_id || 'Not configured'}</dd></div><div><dt>Credentials</dt><dd>{hhaxCfg.hhax_password ? 'Password saved in this browser' : 'Not configured'}</dd></div></dl>
+                <p className={panelStyles.hint}>These preferences are stored in this browser. Server submission credentials are configured separately.</p>
+              </section>}
+            </>}
           </div>
         </div>
       )}
 
-      {/* ══ SECURITY ═══════════════════════════════════════════════════════ */}
       {tab === 'security' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="card" style={{ padding: '11px 16px', background: '#f4f7ff', borderColor: '#c7d4f5' }}>
-            <div style={{ fontSize: 12, color: '#3b5bdb', lineHeight: 1.7 }}>
-              <strong>Two access types — manage separately.</strong>&nbsp;
-              <strong>Portal users</strong> (Coordinators, Agency Admins) change their own password and must verify their current password.&nbsp;
-              <strong>Mobile App users</strong> (Caregivers / DSPs) have their passwords reset by an admin — no current password required.
-            </div>
+        <div className={panelStyles.page}>
+          <div className={panelStyles.heading}><h2>Security</h2><p className={panelStyles.subtitle}>Manage your portal password and caregiver mobile access.</p></div>
+          <div className={panelStyles.grid}>
+            <section className={panelStyles.card}>
+              <div className={panelStyles.cardHeader}><div><h3>Portal Users</h3><p className={panelStyles.subtitle}>Change your own portal password.</p></div><span className={panelStyles.badge}>WEB</span></div>
+              <dl className={panelStyles.summary}><div><dt>Signed in as</dt><dd>{user?.display_name || user?.username}</dd></div><div><dt>Email</dt><dd>{user?.email || 'Not configured'}</dd></div></dl>
+              <p className={panelStyles.hint}>Your current password is required to make a change.</p>
+              <button className="btn secondary" style={{ marginTop: 14 }} onClick={() => { setPortal({ currentPassword: '', newPassword: '', confirmPassword: '' }); setPortalErr(''); setSecurityEditor('portal'); }}>Change password</button>
+            </section>
+            <section className={panelStyles.card} id="mobile-app-users">
+              <div className={panelStyles.cardHeader}><div><h3>Mobile App Users</h3><p className={panelStyles.subtitle}>Reset a caregiver's mobile password.</p></div><span className={panelStyles.badge}>MOBILE</span></div>
+              <dl className={panelStyles.summary}><div><dt>Caregivers</dt><dd>{mobileCaregiversLoading ? 'Loading...' : mobileCaregiversError ? 'Unavailable' : mobileCaregivers.length}</dd></div><div><dt>Reset method</dt><dd>Administrator selects a caregiver</dd></div></dl>
+              <p className={panelStyles.hint}>The caregiver's current password is not required.</p>
+              <button className="btn secondary" style={{ marginTop: 14 }} onClick={() => { setMobile({ username: '', newPassword: '', confirmPassword: '' }); setMobileErr(''); setSecurityEditor('mobile'); }}>Reset mobile password</button>
+              {mobileCaregiversError && <ErrorBanner msg={mobileCaregiversError} />}
+            </section>
           </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div className="card">
-              <div className="card-header" style={{ marginBottom: 14 }}>
-                <div>
-                  <div className="card-title">Portal Users</div>
-                  <div className="card-subtitle">Change your own password · Coordinators &amp; Admins</div>
-                </div>
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', padding: '3px 8px', borderRadius: 3, background: '#dde8ff', color: '#2b4acb' }}>WEB</span>
-              </div>
-              <form onSubmit={handlePortalReset} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div className="info-field">
-                  <div className="info-label">Current Password</div>
-                  <input className="input" type="password" placeholder="Your current password" value={portal.currentPassword} required onChange={e => setPortal(p => ({ ...p, currentPassword: e.target.value }))} />
-                </div>
-                <hr className="form-divider" style={{ margin: '2px 0 4px' }} />
-                <div className="info-field">
-                  <div className="info-label">New Password</div>
-                  <input className="input" type="password" placeholder="Min. 8 characters" value={portal.newPassword} required onChange={e => setPortal(p => ({ ...p, newPassword: e.target.value }))} />
-                </div>
-                <div className="info-field">
-                  <div className="info-label">Confirm New Password</div>
-                  <input className="input" type="password" placeholder="Repeat new password" value={portal.confirmPassword} required onChange={e => setPortal(p => ({ ...p, confirmPassword: e.target.value }))} />
-                </div>
-                {portalErr && <ErrorBanner msg={portalErr} />}
-                {portalMsg && <SuccessBanner msg={portalMsg} />}
-                <button className="btn" type="submit" disabled={portalBusy} style={{ marginTop: 2 }}>{portalBusy ? 'Updating…' : 'Update Password'}</button>
-              </form>
+          <section className={panelStyles.card}>
+            <div className={panelStyles.cardHeader}><div><h3>Password &amp; Session Policy</h3><p className={panelStyles.subtitle}>Security requirements for account changes.</p></div></div>
+            <dl className={panelStyles.summary}><div><dt>Minimum password length</dt><dd>8 characters</dd></div><div><dt>Portal password change</dt><dd>Current password verification required</dd></div><div><dt>Mobile password reset</dt><dd>Authorized administrators and coordinators</dd></div><div><dt>Account scope</dt><dd>Caregivers within your agency</dd></div></dl>
+          </section>
+          {(portalMsg || mobileMsg) && <div className={panelStyles.toast} role="status">{portalMsg || mobileMsg}</div>}
+          {securityEditor === 'portal' && <SettingsDialog title="Change portal password" description="Verify your current password, then choose a new one." onSubmit={handlePortalReset} busy={portalBusy} error={portalErr} submitLabel="Update password" onClose={() => { if (!portalBusy) { setSecurityEditor(null); setPortal({ currentPassword: '', newPassword: '', confirmPassword: '' }); setPortalErr(''); } }}>
+            <div className={panelStyles.fields}>
+              <label className={panelStyles.full}><span className={panelStyles.label}>Current password *</span><input type="password" autoComplete="current-password" required value={portal.currentPassword} onChange={e => setPortal(p => ({ ...p, currentPassword: e.target.value }))} /></label>
+              <label><span className={panelStyles.label}>New password *</span><input type="password" autoComplete="new-password" required minLength={8} value={portal.newPassword} onChange={e => setPortal(p => ({ ...p, newPassword: e.target.value }))} /></label>
+              <label><span className={panelStyles.label}>Confirm new password *</span><input type="password" autoComplete="new-password" required minLength={8} value={portal.confirmPassword} onChange={e => setPortal(p => ({ ...p, confirmPassword: e.target.value }))} /></label>
             </div>
-
-            <div className="card" id="mobile-app-users">
-              <div className="card-header" style={{ marginBottom: 14 }}>
-                <div>
-                  <div className="card-title">Mobile App Users</div>
-                  <div className="card-subtitle">Admin resets a caregiver's password · No current password required</div>
-                </div>
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', padding: '3px 8px', borderRadius: 3, background: '#e8f5e9', color: '#2e7d32' }}>MOBILE</span>
-              </div>
-              <form onSubmit={handleMobileReset} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div className="info-field">
-                  <label className="info-label" htmlFor="mobile-caregiver">Caregiver</label>
-                  <select id="mobile-caregiver" className="form-select" value={mobile.username} required disabled={mobileBusy || mobileCaregiversLoading || !!mobileCaregiversError} onChange={e => { setMobile({ username: e.target.value, newPassword: '', confirmPassword: '' }); setMobileErr(''); setMobileMsg(''); }}>
-                    <option value="">{mobileCaregiversLoading ? 'Loading caregivers…' : 'Select a caregiver…'}</option>
-                    {mobileCaregivers.map(caregiver => <option key={caregiver.employee_id} value={caregiver.username ?? `unavailable-${caregiver.employee_id}`} disabled={!caregiver.username}>
-                      {caregiver.name} · {caregiver.employee_code} · {caregiver.username ?? 'No active mobile account'}
-                    </option>)}
-                  </select>
-                  {mobileCaregiversError && <ErrorBanner msg={mobileCaregiversError} />}
-                  {!mobileCaregiversLoading && !mobileCaregiversError && mobileCaregivers.length === 0 && <div className="form-hint">No caregivers are available.</div>}
-                </div>
-                <hr className="form-divider" style={{ margin: '2px 0 4px' }} />
-                <div className="info-field">
-                  <div className="info-label">New Password</div>
-                  <input className="input" type="password" placeholder="Min. 8 characters" value={mobile.newPassword} required onChange={e => setMobile(m => ({ ...m, newPassword: e.target.value }))} />
-                </div>
-                <div className="info-field">
-                  <div className="info-label">Confirm New Password</div>
-                  <input className="input" type="password" placeholder="Repeat new password" value={mobile.confirmPassword} required onChange={e => setMobile(m => ({ ...m, confirmPassword: e.target.value }))} />
-                </div>
-                {mobileErr && <ErrorBanner msg={mobileErr} />}
-                {mobileMsg && <SuccessBanner msg={mobileMsg} />}
-                <button className="btn" type="submit" disabled={mobileBusy || !mobile.username || mobileCaregiversLoading || !!mobileCaregiversError} style={{ marginTop: 2 }}>{mobileBusy ? 'Resetting…' : 'Reset Password'}</button>
-              </form>
+          </SettingsDialog>}
+          {securityEditor === 'mobile' && <SettingsDialog title="Reset mobile password" description="Select a caregiver and set their new mobile app password." onSubmit={handleMobileReset} busy={mobileBusy} error={mobileErr} submitLabel="Reset password" disableSubmit={!mobile.username || mobileCaregiversLoading || !!mobileCaregiversError} onClose={() => { if (!mobileBusy) { setSecurityEditor(null); setMobile({ username: '', newPassword: '', confirmPassword: '' }); setMobileErr(''); } }}>
+            <div className={panelStyles.fields}>
+              <label className={panelStyles.full}><span className={panelStyles.label}>Caregiver *</span><select required value={mobile.username} disabled={mobileCaregiversLoading || !!mobileCaregiversError} onChange={e => { setMobile({ username: e.target.value, newPassword: '', confirmPassword: '' }); setMobileErr(''); }}><option value="">{mobileCaregiversLoading ? 'Loading caregivers...' : 'Select a caregiver...'}</option>{mobileCaregivers.map(c => <option key={c.employee_id} value={c.username || `unavailable-${c.employee_id}`} disabled={!c.username}>{c.name} - {c.employee_code} - {c.username || 'No active mobile account'}</option>)}</select></label>
+              <label><span className={panelStyles.label}>New password *</span><input type="password" autoComplete="new-password" required minLength={8} value={mobile.newPassword} onChange={e => setMobile(m => ({ ...m, newPassword: e.target.value }))} /></label>
+              <label><span className={panelStyles.label}>Confirm new password *</span><input type="password" autoComplete="new-password" required minLength={8} value={mobile.confirmPassword} onChange={e => setMobile(m => ({ ...m, confirmPassword: e.target.value }))} /></label>
             </div>
-          </div>
-
-          <div className="card">
-            <div className="card-header" style={{ marginBottom: 12 }}>
-              <div>
-                <div className="card-title">Password &amp; Session Policy</div>
-                <div className="card-subtitle">Current security configuration</div>
-              </div>
-            </div>
-            <div className="detail-grid">
-              {[
-                ['Min. Password Length', '8 characters'],
-                ['Session Duration', '24 hours (JWT TTL)'],
-                ['Failed Login Throttle', '5 attempts → 2–10 s delay'],
-                ['Account Lockout', '10 attempts → 15-min lockout'],
-                ['Token Algorithm', 'HS256 (JWT)'],
-                ['Session Revocation', 'Immediate (JTI blacklist)'],
-              ].map(([label, val]) => (
-                <div key={label} className="info-field">
-                  <div className="info-label">{label}</div>
-                  <div className="info-value">{val}</div>
-                </div>
-              ))}
-            </div>
-          </div>
+            {mobileCaregiversError && <ErrorBanner msg={mobileCaregiversError} />}
+            {!mobileCaregiversLoading && !mobileCaregiversError && mobileCaregivers.length === 0 && <p className={panelStyles.hint}>No caregivers are available.</p>}
+          </SettingsDialog>}
         </div>
       )}
 
-      {/* ══ PAY GROUP ══════════════════════════════════════════════════════ */}
       {tab === 'payroll' && <PayrollSettingsPanel key={user?.agency_id ?? 'no-agency'} />}
 
       {tab === 'integrations' && (
@@ -968,7 +858,7 @@ function SettingsPageContent() {
                     name="Sandata Pennsylvania"
                     description="ODP / Waiver services · PA-DHS EVV v1.4 aggregator submission."
                     connected={sandataCfg.sandata_enabled}
-                    onAction={() => setShowSandataModal(true)}
+                    onAction={openSandata}
                   />
                 )}
                 {showHhax && (
@@ -977,7 +867,7 @@ function SettingsPageContent() {
                     name="HHAeXchange Pennsylvania"
                     description="PDA / MA services · per-branch EVV submission."
                     connected={hhaxCfg.hhax_enabled}
-                    onAction={() => setShowHhaxModal(true)}
+                    onAction={openHhax}
                   />
                 )}
               </>
@@ -1070,145 +960,30 @@ function SettingsPageContent() {
       )}
 
       {/* ══ MODAL — Sandata ════════════════════════════════════════════════ */}
-      {showSandataModal && (
-        <Modal title="Sandata Pennsylvania" onClose={() => setShowSandataModal(false)}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>ODP / Waiver services · PA-DHS v1.4</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: sandataCfg.sandata_enabled ? '#35693c' : 'var(--muted)' }}>
-                  {sandataCfg.sandata_enabled ? 'On' : 'Off'}
-                </span>
-                <Toggle checked={sandataCfg.sandata_enabled} onChange={v => setSandataCfg(s => ({ ...s, sandata_enabled: v }))} />
-              </div>
-            </div>
+      {showSandataModal && <SettingsDialog title="Configure Sandata" description="Browser preferences for ODP / Waiver submissions. Server credentials are managed separately." busy={sandataAggSaving} error={sandataAggErr} onClose={closeSandata} onSubmit={e => { e.preventDefault(); if (saveSandata()) setShowSandataModal(false); }}>
+        <div className={panelStyles.fields}>
+          <label className={panelStyles.full} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}><input type="checkbox" style={{ width: 16 }} checked={sandataCfg.sandata_enabled} onChange={e => setSandataCfg(c => ({ ...c, sandata_enabled: e.target.checked }))} />Enable Sandata in this browser</label>
+          {([
+            ['sandata_medicaid_provider_id', 'Medicaid Provider ID', true], ['sandata_national_provider_id', 'National Provider ID (NPI)', false],
+            ['sandata_provider_qualifier', 'Provider Qualifier', false], ['sandata_business_entity_id', 'Business Entity ID', false],
+            ['sandata_user_id', 'User ID', true], ['sandata_tax_id', 'Tax ID (EIN)', false], ['sandata_password', 'Password', true],
+          ] as const).map(([key, title, required]) => <label key={key}><span className={panelStyles.label}>{title}{required && sandataCfg.sandata_enabled ? ' *' : ''}</span><input type={key === 'sandata_password' ? 'password' : 'text'} autoComplete={key === 'sandata_password' ? 'new-password' : 'off'} required={required && sandataCfg.sandata_enabled} value={sandataCfg[key]} onChange={e => setSandataCfg(c => ({ ...c, [key]: e.target.value }))} /></label>)}
+          <label><span className={panelStyles.label}>Submission mode</span><select value={sandataCfg.sandata_mode} onChange={e => setSandataCfg(c => ({ ...c, sandata_mode: e.target.value as SandataForm['sandata_mode'] }))}><option value="simulate">Simulation</option><option value="live">Live</option></select></label>
+        </div>
+        <p className={panelStyles.hint}>Saved only in this browser; this does not change the server's submission mode or credentials.</p>
+      </SettingsDialog>}
 
-            <hr className="form-divider" style={{ margin: 0 }} />
-
-            <div className="info-field">
-              <div className="info-label">Medicaid Provider ID <span style={{ color: '#d56b6b' }}>*</span></div>
-              <input className="input" placeholder="e.g. 123456789A" value={sandataCfg.sandata_medicaid_provider_id} onChange={e => setSandataCfg(s => ({ ...s, sandata_medicaid_provider_id: e.target.value }))} />
-            </div>
-            <div className="info-field">
-              <div className="info-label">National Provider ID (NPI)</div>
-              <input className="input" placeholder="10-digit NPI" value={sandataCfg.sandata_national_provider_id} onChange={e => setSandataCfg(s => ({ ...s, sandata_national_provider_id: e.target.value }))} />
-            </div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">Provider Qualifier</div>
-                <select className="input" value={sandataCfg.sandata_provider_qualifier} onChange={e => setSandataCfg(s => ({ ...s, sandata_provider_qualifier: e.target.value }))}>
-                  <option value="">— Select —</option>
-                  <option value="1">1 — Individual</option>
-                  <option value="2">2 — Organization</option>
-                  <option value="3">3 — Group Practice</option>
-                </select>
-              </div>
-              <div className="info-field">
-                <div className="info-label">Business Entity ID</div>
-                <input className="input" placeholder="Assigned by Sandata" value={sandataCfg.sandata_business_entity_id} onChange={e => setSandataCfg(s => ({ ...s, sandata_business_entity_id: e.target.value }))} />
-              </div>
-            </div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">User ID <span style={{ color: '#d56b6b' }}>*</span></div>
-                <input className="input" placeholder="Sandata portal username" value={sandataCfg.sandata_user_id} onChange={e => setSandataCfg(s => ({ ...s, sandata_user_id: e.target.value }))} />
-              </div>
-              <div className="info-field">
-                <div className="info-label">Tax ID (EIN)</div>
-                <input className="input" placeholder="XX-XXXXXXX" value={sandataCfg.sandata_tax_id} onChange={e => setSandataCfg(s => ({ ...s, sandata_tax_id: e.target.value }))} />
-              </div>
-            </div>
-            <div className="info-field">
-              <div className="info-label">Password <span style={{ color: '#d56b6b' }}>*</span></div>
-              <input className="input" type="password" placeholder="••••••••••••" value={sandataCfg.sandata_password} onChange={e => setSandataCfg(s => ({ ...s, sandata_password: e.target.value }))} />
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>Stored locally only — never sent to SeriqCare servers.</div>
-            </div>
-            <div className="info-field">
-              <div className="info-label">Submission Mode</div>
-              <select className="input" value={sandataCfg.sandata_mode} onChange={e => setSandataCfg(s => ({ ...s, sandata_mode: e.target.value as 'simulate' | 'live' }))}>
-                <option value="simulate">Simulate (dev / staging)</option>
-                <option value="live">Live (production)</option>
-              </select>
-            </div>
-
-            {sandataAggErr && <ErrorBanner msg={sandataAggErr} />}
-            {sandataAggMsg && <SuccessBanner msg={sandataAggMsg} />}
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button className="btn secondary" onClick={() => setSandataCfg(DEFAULT_SANDATA)}>Reset</button>
-              <button className="btn secondary" onClick={() => setShowSandataModal(false)}>Cancel</button>
-              <button className="btn" style={{ background: '#2567a4' }} onClick={() => { saveSandata(); if (!sandataAggErr) setShowSandataModal(false); }} disabled={sandataAggSaving}>
-                {sandataAggSaving ? 'Saving…' : 'Save Sandata'}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* ══ MODAL — HHAeXchange ════════════════════════════════════════════ */}
-      {showHhaxModal && (
-        <Modal title="HHAeXchange Pennsylvania" onClose={() => setShowHhaxModal(false)}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>PDA / MA services · per-branch submission</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: hhaxCfg.hhax_enabled ? '#35693c' : 'var(--muted)' }}>
-                  {hhaxCfg.hhax_enabled ? 'On' : 'Off'}
-                </span>
-                <Toggle checked={hhaxCfg.hhax_enabled} onChange={v => setHhaxCfg(h => ({ ...h, hhax_enabled: v }))} />
-              </div>
-            </div>
-
-            <hr className="form-divider" style={{ margin: 0 }} />
-
-            <div className="info-field">
-              <div className="info-label">Provider ID <span style={{ color: '#d56b6b' }}>*</span></div>
-              <input className="input" placeholder="HHAeXchange Provider ID" value={hhaxCfg.hhax_provider_id} onChange={e => setHhaxCfg(h => ({ ...h, hhax_provider_id: e.target.value }))} />
-            </div>
-            <div className="info-field">
-              <div className="info-label">Branch ID</div>
-              <input className="input" placeholder="HHAeXchange Branch ID" value={hhaxCfg.hhax_branch_id} onChange={e => setHhaxCfg(h => ({ ...h, hhax_branch_id: e.target.value }))} />
-            </div>
-            <div className="info-field">
-              <div className="info-label">Business Entity ID</div>
-              <input className="input" placeholder="Assigned by HHAeXchange" value={hhaxCfg.hhax_business_entity_id} onChange={e => setHhaxCfg(h => ({ ...h, hhax_business_entity_id: e.target.value }))} />
-            </div>
-            <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="info-field">
-                <div className="info-label">User ID <span style={{ color: '#d56b6b' }}>*</span></div>
-                <input className="input" placeholder="HHAeXchange portal username" value={hhaxCfg.hhax_user_id} onChange={e => setHhaxCfg(h => ({ ...h, hhax_user_id: e.target.value }))} />
-              </div>
-              <div className="info-field">
-                <div className="info-label">Tax ID (EIN)</div>
-                <input className="input" placeholder="XX-XXXXXXX" value={hhaxCfg.hhax_tax_id} onChange={e => setHhaxCfg(h => ({ ...h, hhax_tax_id: e.target.value }))} />
-              </div>
-            </div>
-            <div className="info-field">
-              <div className="info-label">Password <span style={{ color: '#d56b6b' }}>*</span></div>
-              <input className="input" type="password" placeholder="••••••••••••" value={hhaxCfg.hhax_password} onChange={e => setHhaxCfg(h => ({ ...h, hhax_password: e.target.value }))} />
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>Stored locally only — never sent to SeriqCare servers.</div>
-            </div>
-            <div className="info-field">
-              <div className="info-label">Submission Mode</div>
-              <select className="input" value={hhaxCfg.hhax_mode} onChange={e => setHhaxCfg(h => ({ ...h, hhax_mode: e.target.value as 'test' | 'production' }))}>
-                <option value="test">Test (staging environment)</option>
-                <option value="production">Production (live)</option>
-              </select>
-            </div>
-
-            {hhaxAggErr && <ErrorBanner msg={hhaxAggErr} />}
-            {hhaxAggMsg && <SuccessBanner msg={hhaxAggMsg} />}
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button className="btn secondary" onClick={() => setHhaxCfg(DEFAULT_HHAX)}>Reset</button>
-              <button className="btn secondary" onClick={() => setShowHhaxModal(false)}>Cancel</button>
-              <button className="btn" style={{ background: '#1F8C8A' }} onClick={() => { saveHhax(); if (!hhaxAggErr) setShowHhaxModal(false); }} disabled={hhaxAggSaving}>
-                {hhaxAggSaving ? 'Saving…' : 'Save HHAeXchange'}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      {showHhaxModal && <SettingsDialog title="Configure HHAeXchange" description="Browser preferences for PDA / MA submissions. Server credentials are managed separately." busy={hhaxAggSaving} error={hhaxAggErr} onClose={closeHhax} onSubmit={e => { e.preventDefault(); if (saveHhax()) setShowHhaxModal(false); }}>
+        <div className={panelStyles.fields}>
+          <label className={panelStyles.full} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}><input type="checkbox" style={{ width: 16 }} checked={hhaxCfg.hhax_enabled} onChange={e => setHhaxCfg(c => ({ ...c, hhax_enabled: e.target.checked }))} />Enable HHAeXchange in this browser</label>
+          {([
+            ['hhax_provider_id', 'Provider ID', true], ['hhax_branch_id', 'Branch ID', false], ['hhax_business_entity_id', 'Business Entity ID', false],
+            ['hhax_user_id', 'User ID', true], ['hhax_tax_id', 'Tax ID (EIN)', false], ['hhax_password', 'Password', true],
+          ] as const).map(([key, title, required]) => <label key={key}><span className={panelStyles.label}>{title}{required && hhaxCfg.hhax_enabled ? ' *' : ''}</span><input type={key === 'hhax_password' ? 'password' : 'text'} autoComplete={key === 'hhax_password' ? 'new-password' : 'off'} required={required && hhaxCfg.hhax_enabled} value={hhaxCfg[key]} onChange={e => setHhaxCfg(c => ({ ...c, [key]: e.target.value }))} /></label>)}
+          <label className={panelStyles.full}><span className={panelStyles.label}>Submission mode</span><select value={hhaxCfg.hhax_mode} onChange={e => setHhaxCfg(c => ({ ...c, hhax_mode: e.target.value as HhaxForm['hhax_mode'] }))}><option value="test">Test</option><option value="production">Production</option></select></label>
+        </div>
+        <p className={panelStyles.hint}>Saved only in this browser; this does not change the server's submission mode or credentials.</p>
+      </SettingsDialog>}
 
     </ProtectedLayout>
   );

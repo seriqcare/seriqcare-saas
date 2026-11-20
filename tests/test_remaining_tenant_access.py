@@ -119,29 +119,19 @@ class RemainingTenantTests(unittest.TestCase):
         for method, path, body in endpoints:
             self.assertEqual(self.call(method, path, body), 403)
         self.auth()
-        self.assertEqual(self.call("GET", "/billing/group-visits"), 200)
-        self.assertEqual(self.call("POST", "/billing/generate-bulk", {"period": "this_month"}), 200)
-        inserts = [p for sql, p in self.db.queries if "INSERT INTO care.billing_claims" in sql]
-        self.assertEqual([p["agency_id"] for p in inserts], [1])
-        self.assertEqual(self.call("PATCH", "/billing/claims/20/status", {"status": "Ready"}), 404)
-        self.assertEqual(self.call("PATCH", "/billing/claims/10/status", {"status": "Ready"}), 200)
-        update = next(p for sql, p in self.db.queries if "UPDATE care.billing_claims" in sql)
-        self.assertEqual(update["_agy_id"], 1)
+        for method, path, body in endpoints:
+            self.assertEqual(self.call(method, path, body), 410)
         self.auth("super_admin", None)
-        self.assertEqual(self.call("PATCH", "/billing/claims/20/status", {"status": "Ready"}), 200)
-        self.assertEqual(self.call("POST", "/billing/generate-bulk", {"period": "this_month"}), 200)
-        inserts = [p for sql, p in self.db.queries if "INSERT INTO care.billing_claims" in sql]
-        self.assertEqual([p["agency_id"] for p in inserts], [1, 1, 2])
+        for method, path, body in endpoints:
+            self.assertEqual(self.call(method, path, body), 410)
+        self.assertFalse(any("INSERT INTO care.billing_claims" in sql or "UPDATE care.billing_claims" in sql for sql, _ in self.db.queries))
 
-    def test_single_claim_rejects_mixed_or_foreign_visits(self):
-        self.auth()
-        self.assertEqual(self.call("POST", "/billing/generate", {"visit_ids": [10, 20], "payer": "private"}), 404)
-        self.assertEqual(self.call("POST", "/billing/generate", {"visit_ids": [10], "payer": "private"}), 200)
-        self.auth("super_admin", None)
-        self.assertEqual(self.call("POST", "/billing/generate", {"visit_ids": [10, 20], "payer": "private"}), 400)
-        self.assertEqual(self.call("POST", "/billing/generate", {"visit_ids": [20], "payer": "private"}), 200)
-        inserts = [p for sql, p in self.db.queries if "INSERT INTO care.billing_claims" in sql]
-        self.assertEqual([p["agency_id"] for p in inserts], [1, 2])
+    def test_legacy_claim_generation_is_retired_for_all_agencies(self):
+        for role, agency in [("coordinator", 1), ("super_admin", None)]:
+            self.auth(role, agency)
+            for visits in ([10], [20], [10, 20]):
+                self.assertEqual(self.call("POST", "/billing/generate", {"visit_ids": visits, "payer": "private"}), 410)
+        self.assertFalse(any("INSERT INTO care.billing_claims" in sql for sql, _ in self.db.queries))
 
     def test_caregiver_payroll_requires_owned_employee(self):
         for method in ("GET", "PATCH"):

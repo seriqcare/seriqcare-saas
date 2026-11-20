@@ -72,7 +72,7 @@ log = logging.getLogger("seriqcare.readiness")
 from backend.routers import (
     dashboard, clients, client_records, schedule, visits, caregivers,
     auth, aggregator, timesheets, settings, billing,
-    super_admin, documentation,
+    super_admin, documentation, exports,
 )
 from backend.routers import (
     mobile_schedules,
@@ -99,6 +99,16 @@ async def lifespan(app: FastAPI):
         ensure_service_rates_table(engine)
     except Exception:
         log.exception("Could not initialize agency service rates")
+    from backend.services.data_exports import ensure_export_tables
+    try:
+        ensure_export_tables(engine)
+    except Exception:
+        log.exception("Could not initialize export history")
+    from backend.services.client_intake import ensure_intake_fields
+    try:
+        ensure_intake_fields(engine)
+    except Exception:
+        log.exception("Could not initialize client intake fields")
     yield
 
     print("[shutdown] SeriqCare backend stopped")
@@ -166,6 +176,7 @@ app.include_router(caregivers.router,  prefix="/api/caregivers",  tags=["Caregiv
 app.include_router(aggregator.router,  prefix="/api/aggregator",  tags=["Aggregator"])
 app.include_router(timesheets.router,  prefix="/api/timesheets",  tags=["Timesheets"])
 app.include_router(settings.router,    prefix="/api/settings",    tags=["Settings"])
+app.include_router(exports.router, prefix="/api/exports", tags=["Exports"])
 app.include_router(billing.router,     prefix="/api/billing",     tags=["Billing"])
 app.include_router(super_admin.router,    prefix="/api/super-admin",    tags=["Super Admin"])
 app.include_router(documentation.router, prefix="/api/documentation", tags=["Documentation"])

@@ -149,7 +149,6 @@ function buildAgencyNav(tier: string | null | undefined): NavGroup[] {
       links: [
         { href: '/timesheets', label: 'Timesheets', icon: Icons.timesheets },
         { href: '/billing',    label: 'Billing',    icon: Icons.billing },
-        { href: '/claims',     label: 'Claims',     icon: Icons.claims },
       ],
     },
     {
