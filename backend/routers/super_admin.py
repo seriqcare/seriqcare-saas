@@ -26,7 +26,7 @@ from backend.auth.dependencies import require_role
 from backend.auth.constants import PLATFORM_LOGIN_CODE
 from backend.services.agency_providers import provision_agency_provider
 from backend.services.auth_tokens import hash_token
-from backend.services.timezone import SQLSERVER_LOCAL_DATE_EXPR
+from backend.services.timezone import SQLSERVER_LOCAL_DATE_EXPR, utc_iso, eastern_day_utc_bounds
 from db.database import get_db
 from db.models import User, PasswordResetToken
 
@@ -84,14 +84,15 @@ def get_overview(
     recent_events: list[dict] = []
 
     try:
-        audit_row = db.execute(text(f"""
+        day_start, day_end = eastern_day_utc_bounds()
+        audit_row = db.execute(text("""
             SELECT
                 SUM(CASE WHEN action = 'LOGIN'        THEN 1 ELSE 0 END) AS logins,
                 SUM(CASE WHEN action = 'FAILED_LOGIN' THEN 1 ELSE 0 END) AS failed,
                 SUM(CASE WHEN action = 'CLOCK_IN'     THEN 1 ELSE 0 END) AS clock_ins
             FROM audit.audit_log
-            WHERE created_at >= {SQLSERVER_LOCAL_DATE_EXPR}
-        """)).fetchone()
+            WHERE created_at >= :day_start AND created_at < :day_end
+        """), {"day_start": day_start, "day_end": day_end}).fetchone()
         if audit_row:
             logins_today       = audit_row.logins    or 0
             failed_logins_today = audit_row.failed   or 0
@@ -104,7 +105,7 @@ def get_overview(
             FROM audit.audit_log
             ORDER BY created_at DESC
         """)).fetchall()
-        recent_events = [dict(r._mapping) for r in rows]
+        recent_events = [{**dict(r._mapping), 'created_at': utc_iso(r.created_at)} for r in rows]
     except Exception:
         pass
 
@@ -144,7 +145,7 @@ def list_agencies(
         FROM  care.agencies a
         ORDER BY a.is_active DESC, a.name
     """)).fetchall()
-    return [dict(r._mapping) for r in rows]
+    return [{**dict(r._mapping), 'created_at': utc_iso(r.created_at)} for r in rows]
 
 
 class AgencyCreate(BaseModel):
@@ -382,7 +383,7 @@ def list_users(
             CASE WHEN u.last_login_at IS NULL THEN 1 ELSE 0 END,
             u.last_login_at DESC
     """), params).fetchall()
-    return [dict(r._mapping) for r in rows]
+    return [{**dict(r._mapping), 'created_at': utc_iso(r.created_at), 'last_login_at': utc_iso(r.last_login_at)} for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +428,7 @@ def get_audit_log(
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         ).fetchone()
 
-        return {"total": total_row[0], "rows": [dict(r._mapping) for r in rows]}
+        return {"total": total_row[0], "rows": [{**dict(r._mapping), "created_at": utc_iso(r.created_at)} for r in rows]}
     except Exception as exc:
         log.warning("audit-log query failed: %s", exc)
         return {"total": 0, "rows": []}
@@ -474,7 +475,7 @@ def get_api_access_log(
             {k: v for k, v in params.items() if k not in ("limit", "offset")},
         ).fetchone()
 
-        return {"total": total_row[0], "rows": [dict(r._mapping) for r in rows]}
+        return {"total": total_row[0], "rows": [{**dict(r._mapping), "created_at": utc_iso(r.created_at)} for r in rows]}
     except Exception as exc:
         log.warning("api-access-log query failed: %s", exc)
         return {"total": 0, "rows": []}

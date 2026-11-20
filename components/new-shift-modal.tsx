@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { scheduleInputParts } from '@/lib/datetime';
 import { useRouter } from 'next/navigation';
 
 import { useAuth } from '@/components/auth-context';
@@ -30,23 +31,6 @@ interface Props {
   assignmentMode?: boolean;
 }
 
-function parseDateTime(value: string) {
-  return new Date(value.includes('T') ? value : value.replace(' ', 'T'));
-}
-
-function toInputDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function toInputTime(date: Date) {
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${hours}:${minutes}`;
-}
-
 export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceCodes, compact = false, linkLabel, shift, assignmentMode = false }: Props) {
   const router = useRouter();
   const { user } = useAuth();
@@ -69,11 +53,11 @@ export function NewShiftButton({ defaultDate = '', clients, caregivers, serviceC
 
   function hydrateForm() {
     if (shift) {
-      const start = parseDateTime(shift.scheduled_start);
-      const end = parseDateTime(shift.scheduled_end);
-      setDate(toInputDate(start));
-      setStartTime(toInputTime(start));
-      setEndTime(toInputTime(end));
+      const start = scheduleInputParts(shift.scheduled_start);
+      const end = scheduleInputParts(shift.scheduled_end);
+      setDate(start.date);
+      setStartTime(start.time);
+      setEndTime(end.time);
       setClientId(String(shift.client_id));
       setEmployeeId(shift.employee_id ? String(shift.employee_id) : '');
       setServiceType(shift.service_code ?? '');

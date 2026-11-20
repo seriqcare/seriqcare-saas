@@ -51,6 +51,11 @@ test('Visits uses four records, moves source controls into the toolbar and prese
   const all = nodes(tree);
   const toolbar = all.find(n => n.props?.className === 'top-actions');
   assert.ok(nodes(toolbar).some(n => n.type === 'AggregatorTabs' && n.props.compact));
+  const compactSummary = nodes(toolbar).find(n => n.type === 'details');
+  assert.ok(compactSummary);
+  assert.ok(text(compactSummary).includes('Visit summary'));
+  assert.ok(text(compactSummary).includes('Visit Verification Rate'));
+  assert.ok(text(compactSummary).includes('Quick Actions'));
   assert.ok(!all.some(n => n.type === 'button' && text(n) === 'Export'));
   const history = all.find(n => n.type === 'AggregatorSubmissionHistory');
   assert.equal(history.props.page, 3);

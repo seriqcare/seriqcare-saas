@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { agencyDateKey, parseScheduleDateTime, formatScheduleTime, formatScheduleDate } from '@/lib/datetime';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { getScheduleWeek, getServiceCodes, type ScheduleEntry } from '@/lib/queries/schedule';
 import { getClients } from '@/lib/queries/clients';
@@ -27,7 +28,7 @@ const SCHEDULE_LIST_LIMIT = 7;
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function parseDateTime(value: string) {
-  return new Date(value.includes('T') ? value : value.replace(' ', 'T'));
+  return parseScheduleDateTime(value);
 }
 function parseDateOnly(value: string) {
   const [year, month, day] = value.split('-').map(Number);
@@ -35,10 +36,10 @@ function parseDateOnly(value: string) {
   return new Date(year, month - 1, day, 12, 0, 0, 0);
 }
 function fmtTime(iso: string) {
-  return parseDateTime(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return formatScheduleTime(iso);
 }
 function fmtTimeShort(iso: string) {
-  return parseDateTime(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+  return formatScheduleTime(iso)
     .replace(':00', '').toLowerCase();
 }
 function localIsoDate(date: Date) {
@@ -48,10 +49,10 @@ function localIsoDate(date: Date) {
   return `${year}-${month}-${day}`;
 }
 function isToday(dateStr: string) {
-  return dateStr === localIsoDate(new Date());
+  return dateStr === agencyDateKey();
 }
 function fmtDate(iso: string) {
-  return parseDateTime(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return formatScheduleDate(iso);
 }
 function weekDayLabel(weekStart: string, dayIndex: number) {
   if (!weekStart) return DAY_LABELS[dayIndex] ?? '';
@@ -70,9 +71,9 @@ function initials(name: string | null) {
   return name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 }
 function parseIsoDate(value?: string) {
-  if (!value) return new Date();
+  if (!value) return parseDateOnly(agencyDateKey());
   const parsed = new Date(`${value}T12:00:00`);
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return Number.isNaN(parsed.getTime()) ? parseDateOnly(agencyDateKey()) : parsed;
 }
 function isoDate(date: Date) {
   const copy = new Date(date);
@@ -227,7 +228,7 @@ export default async function SchedulePage({
       <div className="topbar overview-topbar">
         <div>
           <h1 className="page-title">Schedule</h1>
-          <p className="page-subtitle">Weekly caregiver assignments · open shift coverage · real-time status</p>
+          <p className="page-subtitle">Weekly caregiver assignments · open shift coverage · Times in Eastern (ET)</p>
         </div>
         <div className="top-actions">
           {search && (

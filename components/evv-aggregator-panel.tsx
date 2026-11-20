@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import styles from '@/app/evv/evv.module.css';
 import { useAuth } from '@/components/auth-context';
 import {
   submitSingleVisit,
@@ -175,7 +176,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
   useEffect(() => { setHistory(initialHistory); }, [initialHistory]);
   useEffect(() => { setTab(initialTab); }, [initialTab]);
 
-  const historyPages = Math.max(1, Math.ceil(historyTotal / 50));
+  const historyPages = Math.max(1, Math.ceil(historyTotal / 5));
   const lockedVisits = new Set(history.filter(record => ['Accepted', 'Submitted', 'Pending'].includes(record.status)).map(record => record.visit_id));
   const historyHref = (page: number) => `/evv?${new URLSearchParams({ aggregator, tab: 'history', history_page: String(page) })}`;
 
@@ -215,7 +216,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
   const modeBg   = mode === 'live' ? '#f0faf1'  : '#eef5fb';
 
   return (
-    <div>
+    <div className={styles.panelInner}>
       {/* Mode badge */}
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
         <span style={{
@@ -233,7 +234,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
 
       {/* Notifications */}
       {notifications.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
+        <div className={styles.notifications} role="status">
           {notifications.map((n, i) => (
             <div key={i} style={{
               fontSize: 12, padding: '6px 12px', borderRadius: 6, marginBottom: 4,
@@ -259,7 +260,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
 
       {/* ── QUEUE TAB ── */}
       {tab === 'queue' && (
-        <div>
+        <div className={styles.queueSection}>
           {/* Batch submit */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <span style={{ fontSize: 13, color: 'var(--muted)' }}>
@@ -300,6 +301,7 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
           {queue.length > 0 ? (
             <div className="mini-table-wrap">
               <table className="mini-table">
+                <colgroup>{[4, 6, 9, 12, 12, 10, 6, 9, 14, 13, 5].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
                 <thead>
                   <tr>
                     <th>Visit ID</th>
@@ -348,7 +350,8 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
 
       {/* ── HISTORY TAB ── */}
       {tab === 'history' && (
-        <div>
+        <div className={styles.historySection}>
+          <div className={styles.historyTableArea}>
           {history.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)', fontSize: 14 }}>
               No submissions recorded for this agency yet.
@@ -377,8 +380,8 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
                       <td style={{ fontSize: 11, color: 'var(--muted)' }}>{rec.id}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: 11 }}>#{rec.visit_id}</td>
                       <td>{rec.service_date ?? '—'}</td>
-                      <td>{rec.client_name ?? '—'}</td>
-                      <td>{rec.employee_name ?? '—'}</td>
+                      <td title={rec.client_name || undefined}>{rec.client_name ?? '—'}</td>
+                      <td title={rec.employee_name || undefined}>{rec.employee_name ?? '—'}</td>
                       <td><AggregatorBadge agg={rec.aggregator} /></td>
                       <td style={{ fontSize: 11 }}>{rec.submission_type}</td>
                       <td><StatusBadge status={rec.status} /></td>
@@ -400,14 +403,22 @@ export function EvvAggregatorPanel({ initialQueue, initialHistory, historyTotal,
               </table>
             </div>
           )}
-          {historyTotal > 0 && <div className="pagination" style={{ paddingTop: 14 }}>
-            <div>Showing {Math.min((historyPage - 1) * 50 + 1, historyTotal)}–{Math.min((historyPage - 1) * 50 + history.length, historyTotal)} of {historyTotal} submissions</div>
+          </div>
+          <div className={`pagination ${styles.historyFooter}`}>
+            <div>Showing {history.length ? (historyPage - 1) * 5 + 1 : 0}–{Math.min((historyPage - 1) * 5 + history.length, historyTotal)} of {historyTotal} submissions</div>
             <div className="page-controls">
-              {historyPage > 1 && <Link className="btn secondary" href={historyHref(historyPage - 1)} style={{ display: 'inline-flex', alignItems: 'center' }}>Previous</Link>}
-              <span>Page {historyPage} of {historyPages}</span>
-              {historyPage < historyPages && <Link className="btn secondary" href={historyHref(historyPage + 1)} style={{ display: 'inline-flex', alignItems: 'center' }}>Next</Link>}
+              {historyPage > 1
+                ? <Link className="page-btn" href={historyHref(historyPage - 1)} aria-label="Previous history page">{'\u2039'}</Link>
+                : <span className="page-btn" aria-disabled="true" style={{ opacity: .35 }}>{'\u2039'}</span>}
+              {Array.from({ length: Math.min(historyPages, 5) }, (_, index) => {
+                const page = Math.max(1, Math.min(historyPage - 2, historyPages - 4)) + index;
+                return <Link key={page} className={`page-btn${page === historyPage ? ' active' : ''}`} href={historyHref(page)} aria-label={`History page ${page}`} aria-current={page === historyPage ? 'page' : undefined}>{page}</Link>;
+              })}
+              {historyPage < historyPages
+                ? <Link className="page-btn" href={historyHref(historyPage + 1)} aria-label="Next history page">{'\u203a'}</Link>
+                : <span className="page-btn" aria-disabled="true" style={{ opacity: .35 }}>{'\u203a'}</span>}
             </div>
-          </div>}
+          </div>
         </div>
       )}
     </div>

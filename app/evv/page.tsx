@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { ProtectedLayout } from '@/components/protected-layout';
-import { HeaderUser } from '@/components/topbar';
 import { EvvAggregatorPanel } from '@/components/evv-aggregator-panel';
 import { AggregatorTabs } from '@/components/aggregator-tabs';
 import styles from './evv.module.css';
@@ -27,14 +26,14 @@ export default async function EVVPage({
 
   const [queueResult, submissionsResult] = await Promise.allSettled([
     getAggregatorQueue(aggregator),
-    getAggregatorSubmissions(historyPage, 50, '', aggregator),
+    getAggregatorSubmissions(historyPage, 5, '', aggregator),
   ]);
   if (queueResult.status === 'rejected' || submissionsResult.status === 'rejected') {
     const retry = `/evv?${new URLSearchParams({ aggregator, tab: tab === 'history' ? 'history' : 'queue', history_page: String(historyPage) })}`;
-    return <ProtectedLayout>
+    return <ProtectedLayout className={styles.workspace}>
       <div className="topbar overview-topbar">
         <h1 className="page-title">EVV Aggregator</h1>
-        <div className="top-actions"><HeaderUser /></div>
+        <div className="top-actions"><AggregatorTabs compact /></div>
       </div>
       <div className="card" role="alert">
         <div className="card-title">Unable to load submission data</div>
@@ -59,18 +58,17 @@ export default async function EVVPage({
   const aggLabel = aggregator === 'hhax' ? 'HHAeXchange' : aggregator === 'sandata' ? 'Sandata' : 'EVV';
 
   return (
-    <ProtectedLayout>
+    <ProtectedLayout className={styles.workspace}>
       {/* ── Top bar ── */}
       <div className="topbar overview-topbar">
         <div className="topbar-left">
           <div className="page-title">{aggLabel} Aggregator</div>
           <div className="page-subtitle">{subtitle}</div>
         </div>
-        <div className="top-actions"><HeaderUser /></div>
+        <div className="top-actions"><AggregatorTabs compact /></div>
       </div>
 
       {/* ── Aggregator tabs ── */}
-      <AggregatorTabs />
 
       {/* ── Stats row ── */}
       <div className={styles.metrics}>
@@ -101,11 +99,12 @@ export default async function EVVPage({
         </div>
       </div>
 
-      {/* ── ESC Code reference (only when there are rejections) ── */}
-      {rejected > 0 && (
-        <div className="alert-list" style={{ marginBottom: 24 }}>
+      {/* ── Always-visible ESC code reference ── */}
+      <section className={styles.reference} aria-label="ESC Code Reference">
+        <div className={styles.referenceHeading}>ESC Code Reference</div>
+        <div className={styles.referenceBody}>
           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
-            {aggLabel} ESC Codes — Action Required
+            {aggLabel} ESC Codes
           </div>
           {[
             { code: 'ESC 927', label: 'Payer/Waiver Mismatch',    cls: 'red',   desc: 'Visit payer or waiver does not match client enrollment. Denied.' },
@@ -122,7 +121,7 @@ export default async function EVVPage({
             </div>
           ))}
         </div>
-      )}
+      </section>
 
       {/* ── Interactive queue + history panel ── */}
       <div className={`card ${styles.panel}`}>

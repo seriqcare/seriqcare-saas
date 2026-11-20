@@ -1,5 +1,6 @@
 'use client';
 
+import { formatAuditDateTime, formatAuditDate } from '@/lib/datetime';
 import { useCallback, useEffect, useState } from 'react';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { HeaderUser } from '@/components/topbar';
@@ -87,16 +88,8 @@ interface ApiLogRow {
 }
 
 /* ── Helpers ────────────────────────────────────── */
-function fmtDate(d: string | null) {
-  if (!d) return '—';
-  const dt = new Date(d);
-  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-function fmtDateTime(d: string | null) {
-  if (!d) return '—';
-  const dt = new Date(d);
-  return dt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
+const fmtDate = formatAuditDate;
+const fmtDateTime = formatAuditDateTime;
 function tierLabel(t: string) {
   const map: Record<string, string> = { core: 'Core', evv: 'EVV', evvplus: 'EVV+' };
   return map[t] ?? t;
@@ -269,7 +262,7 @@ export default function SuperAdminPage() {
               <table className="sa-table">
                 <thead>
                   <tr>
-                    <th>Time</th>
+                    <th>Time (ET)</th>
                     <th>Action</th>
                     <th>User</th>
                     <th>Table</th>
@@ -442,7 +435,7 @@ export default function SuperAdminPage() {
             <table className="sa-table">
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th>Time (ET)</th>
                   <th>Action</th>
                   <th>User</th>
                   <th>Table</th>
@@ -496,7 +489,7 @@ export default function SuperAdminPage() {
             <table className="sa-table">
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th>Time (ET)</th>
                   <th>Method</th>
                   <th>Path</th>
                   <th>Status</th>

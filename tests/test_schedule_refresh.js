@@ -95,6 +95,7 @@ function harness({ edit = false, failSave = false, failRefresh = false } = {}) {
     }) };
     if (name.endsWith('auth-context')) return { useAuth: () => ({ user: { token: 'test' } }) };
     if (name === '@/lib/schedule-navigation') return { scheduleUrlAfterSave };
+    if (name === '@/lib/datetime') return compile('lib/datetime.ts');
     if (name === '@/app/schedule/actions') return { refreshScheduleAfterSave: async () => { events.push('invalidate'); if (failRefresh) throw new Error('refresh failed'); } };
     if (name === '@/lib/queries/schedule') {
       const save = async () => { events.push(edit ? 'update' : 'create'); if (failSave) throw new Error('Save failed'); return { success: true, id: 4 }; };

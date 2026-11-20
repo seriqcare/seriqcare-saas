@@ -42,3 +42,31 @@ def now_eastern() -> datetime:
 def now_eastern_naive() -> datetime:
     """Naive local Eastern wall-clock time for DATETIME/DATETIME2 columns."""
     return now_eastern().replace(tzinfo=None)
+
+
+def utc_iso(value: datetime | None) -> str | None:
+    """Serialize UTC DATETIME2 audit values with an explicit UTC marker."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat().replace('+00:00', 'Z')
+
+
+def eastern_iso(value: datetime | str) -> str:
+    """Schedule DATETIME2 values represent Eastern wall time, not UTC."""
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=EASTERN)
+    return value.astimezone(EASTERN).isoformat()
+
+
+def eastern_day_utc_bounds() -> tuple[datetime, datetime]:
+    """UTC boundaries for today's Eastern calendar day, including DST days."""
+    from datetime import timedelta
+    start = now_eastern().replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return (start.astimezone(UTC).replace(tzinfo=None), end.astimezone(UTC).replace(tzinfo=None))

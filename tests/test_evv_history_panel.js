@@ -25,6 +25,7 @@ function render(extra = {}) {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name === 'react') return { useState: initial => [initial, () => {}], useEffect() {} };
       if (name === 'next/link') return { default: 'a' };
+      if (name.endsWith('.css')) return { default: new Proxy({}, { get: (_, key) => key }) };
       if (name.endsWith('auth-context')) return { useAuth: () => ({ apiFetch() {} }) };
       if (name.endsWith('queries/aggregator')) return {};
       throw new Error(`Unexpected import: ${name}`);
@@ -49,16 +50,16 @@ test('empty queue does not imply that submissions have occurred', () => {
 
 test('history pagination preserves the aggregator and history tab', () => {
   const first = render({ historyTotal: 51, initialHistory: [{ id: 1, visit_id: 1, status: 'Accepted' }] });
-  const next = nodes(first).find(node => node.props?.children === 'Next');
+  const next = nodes(first).find(node => node.props?.['aria-label'] === 'Next history page');
   const query = new URL(next.props.href, 'http://localhost').searchParams;
   assert.equal(query.get('aggregator'), 'sandata');
   assert.equal(query.get('tab'), 'history');
   assert.equal(query.get('history_page'), '2');
-  assert.ok(!nodes(first).some(node => node.props?.children === 'Previous'));
+  assert.ok(!nodes(first).some(node => node.props?.['aria-label'] === 'Previous history page'));
 
-  const last = render({ historyTotal: 51, historyPage: 2, initialHistory: [{ id: 51, visit_id: 51, status: 'Accepted' }] });
-  assert.ok(nodes(last).some(node => node.props?.children === 'Previous'));
-  assert.ok(!nodes(last).some(node => node.props?.children === 'Next'));
+  const last = render({ historyTotal: 51, historyPage: 11, initialHistory: [{ id: 51, visit_id: 51, status: 'Accepted' }] });
+  assert.ok(nodes(last).some(node => node.props?.['aria-label'] === 'Previous history page'));
+  assert.ok(!nodes(last).some(node => node.props?.['aria-label'] === 'Next history page'));
   assert.match(text(last), /Showing 51–51 of 51 submissions/);
 });
 
@@ -82,6 +83,7 @@ async function renderPage(fail = false) {
     require(name) {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name === 'next/link') return { default: 'a' };
+      if (name.endsWith('.css')) return { default: new Proxy({}, { get: (_, key) => key }) };
       if (name.endsWith('protected-layout')) return { ProtectedLayout: 'Layout' };
       if (name.endsWith('topbar')) return { HeaderUser: 'User' };
       if (name.endsWith('evv-aggregator-panel')) return { EvvAggregatorPanel: 'Panel' };

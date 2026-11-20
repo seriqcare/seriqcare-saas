@@ -151,6 +151,51 @@ export default async function VisitsPage({
   const rateColor = compRate == null ? '#8a9aaa' : compRate === 100 ? '#35693c' : '#c4831e';
 
   const tabCfg = getTabConfig(aggregator);
+  const sidebarContent = (<>
+
+
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 12 }}>Visit Verification Rate</div>
+            <div style={{ textAlign: 'center', padding: '8px 0 12px' }}>
+              <div style={{ fontSize: 40, fontWeight: 700, color: rateColor, lineHeight: 1 }}>{compRate == null ? '\u2014' : `${compRate}%`}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5 }}>{summary?.verified_due ?? 0} / {summary?.due ?? 0} visits verified</div>
+            </div>
+            <div style={{ height: 8, background: '#e9eef4', borderRadius: 99, overflow: 'hidden', marginBottom: 12 }}>
+              <div style={{ height: '100%', width: `${compRate ?? 0}%`, background: rateColor, borderRadius: 99 }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.6 }}>
+              Active and exempt visits excluded.
+            </div>
+          </div>
+
+          {/* Quick stats */}
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 10 }}>This Week</div>
+            <div className="quick-stats">
+              {[
+                ['Total Visits',   String(total)],
+                ['Hours Logged',   stats.total_hours.toFixed(1)],
+                ['Approved',       String(stats.approved)],
+                ['EVV Exceptions', String(stats.evv_exceptions)],
+              ].map(([label, value]) => (
+                <div className="quick-stat" key={label}>
+                  <div className="quick-stat-label">{label}</div>
+                  <div className="quick-stat-value">{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Quick links */}
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 10 }}>Quick Actions</div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {[['Schedule', '/schedule'], ['Timesheets', '/timesheets'], ['Care Plans', '/care-plans'], ['Billing', '/billing']].map(([l, h]) => (
+                <Link key={h} href={h} style={{ display: 'block', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-soft)' }}>{l}</Link>
+              ))}
+            </div>
+          </div>
+  </>);
 
   return (
     <ProtectedLayout className={styles.workspace}>
@@ -171,6 +216,10 @@ export default async function VisitsPage({
           )}
           <VisitPeriodSelect current={week} />
           <AggregatorTabs compact />
+          <details className={styles.summaryMenu}>
+            <summary>Visit summary</summary>
+            <div className={styles.summaryPanel}>{sidebarContent}</div>
+          </details>
         </div>
       </div>
 
@@ -290,7 +339,7 @@ export default async function VisitsPage({
                             </div>
                           </td>
                           <td>
-                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+                            <div className={styles.visitActions}>
                               <VisitRowActions visit={v} />
                               {aggregator !== 'hhax' && <VisitSubmitBtn visitId={v.id} evvStatus={v.evv_status} submissionStatus={v.sandata_status} submissionCount={v.sandata_submission_count} />}
                             </div>
@@ -339,50 +388,7 @@ export default async function VisitsPage({
         </div>
 
         {/* ── Right sidebar ───────────────────────────── */}
-        <div className={styles.sidebar}>
-
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 12 }}>Visit Verification Rate</div>
-            <div style={{ textAlign: 'center', padding: '8px 0 12px' }}>
-              <div style={{ fontSize: 40, fontWeight: 700, color: rateColor, lineHeight: 1 }}>{compRate == null ? '\u2014' : `${compRate}%`}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 5 }}>{summary?.verified_due ?? 0} / {summary?.due ?? 0} visits verified</div>
-            </div>
-            <div style={{ height: 8, background: '#e9eef4', borderRadius: 99, overflow: 'hidden', marginBottom: 12 }}>
-              <div style={{ height: '100%', width: `${compRate ?? 0}%`, background: rateColor, borderRadius: 99 }} />
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', lineHeight: 1.6 }}>
-              Active and exempt visits excluded.
-            </div>
-          </div>
-
-          {/* Quick stats */}
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 10 }}>This Week</div>
-            <div className="quick-stats">
-              {[
-                ['Total Visits',   String(total)],
-                ['Hours Logged',   stats.total_hours.toFixed(1)],
-                ['Approved',       String(stats.approved)],
-                ['EVV Exceptions', String(stats.evv_exceptions)],
-              ].map(([label, value]) => (
-                <div className="quick-stat" key={label}>
-                  <div className="quick-stat-label">{label}</div>
-                  <div className="quick-stat-value">{value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick links */}
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 10 }}>Quick Actions</div>
-            <div style={{ display: 'grid', gap: 8 }}>
-              {[['Schedule', '/schedule'], ['Timesheets', '/timesheets'], ['Care Plans', '/care-plans'], ['Billing', '/billing']].map(([l, h]) => (
-                <Link key={h} href={h} style={{ display: 'block', padding: '9px 12px', border: '1px solid var(--line)', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-soft)' }}>{l}</Link>
-              ))}
-            </div>
-          </div>
-        </div>
+        <aside className={styles.sidebar} aria-label="Visit summary">{sidebarContent}</aside>
       </div>
     </ProtectedLayout>
   );

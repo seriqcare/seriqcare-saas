@@ -47,6 +47,7 @@ export function AggregatorTabs({ compact = false }: { compact?: boolean }) {
     next.delete('status');
     next.delete('page');
     next.delete('historyPage');
+    next.delete('history_page');
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }

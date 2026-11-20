@@ -4,7 +4,7 @@ Returns the full weekly schedule with stats and alerts.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from db.database import get_db
 from backend.auth.dependencies import get_agency_scope, AgencyScope
-from backend.services.timezone import now_eastern_naive
+from backend.services.timezone import now_eastern_naive, EASTERN, eastern_iso
 from backend.schemas import (
     ScheduleAlert,
     ScheduleCreateRequest,
@@ -41,7 +41,7 @@ def _week_bounds(reference: date) -> tuple[date, date]:
 def _parse_schedule_datetime(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     if parsed.tzinfo is not None:
-        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed.astimezone(EASTERN).replace(tzinfo=None)
     return parsed
 
 
@@ -130,9 +130,9 @@ def get_week_schedule(
             try:
                 ref_date = _date.fromisoformat(date)
             except ValueError:
-                ref_date = _date.today()
+                ref_date = now_eastern_naive().date()
         else:
-            ref_date = _date.today()
+            ref_date = now_eastern_naive().date()
 
         week_start, week_end = _week_bounds(ref_date)
         week_start_str = week_start.isoformat()
@@ -192,8 +192,8 @@ def get_week_schedule(
                 employee_name=r.employee_name,
                 service_code=r.service_code,
                 service_type=r.service_type,
-                scheduled_start=str(r.scheduled_start),
-                scheduled_end=str(r.scheduled_end),
+                scheduled_start=eastern_iso(r.scheduled_start),
+                scheduled_end=eastern_iso(r.scheduled_end),
                 status=str(r.status),
                 notes=r.notes,
                 day_of_week=_SQL_WEEKDAY_TO_MON_FIRST.get(int(r.day_of_week_sql), 0),
