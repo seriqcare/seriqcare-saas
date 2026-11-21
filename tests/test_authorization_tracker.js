@@ -23,6 +23,7 @@ function harness(items, error) {
   vm.runInNewContext(js, { module: mod, exports: mod.exports,
     require(name) {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
+      if (name === '@/lib/datetime') { const dates = { exports: {} }; vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/datetime.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { module: dates, exports: dates.exports }); return dates.exports; }
       if (name === 'react') return { useState(initial) { const index = cursor++; if (!(index in states)) states[index] = initial; return [states[index], value => { states[index] = value; }]; }, useEffect() {}, useRef: () => ({ current: null }) };
       if (name === 'next/link') return { default: 'a' };
       if (name.endsWith('.css')) return { default: new Proxy({}, { get: (_, key) => key }) };
@@ -94,9 +95,10 @@ test('caregiver directory renders created date separately from hire date', async
   vm.runInNewContext(js, { module: mod, exports: mod.exports,
     require(name) {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
+      if (name === '@/lib/datetime') { const dates = { exports: {} }; vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/datetime.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { module: dates, exports: dates.exports }); return dates.exports; }
       if (name.endsWith('queries/caregivers')) return { getCaregivers: async () => ({ total: 1,
         stats: { active: 1, on_leave: 0, inactive: 0, total_hours_this_week: 0 },
-        items: [{ id: 1, name: 'Test Caregiver', role: 'DSP', hire_date: '2020-01-01', created_at: '2026-11-19T10:00:00',
+        items: [{ id: 1, name: 'Test Caregiver', role: 'DSP', hire_date: '2020-01-01', created_at: '2026-11-21T02:15:00Z',
           hours_this_week: 0, clients_assigned: 0, visits_this_week: 0 }],
       }) };
       return new Proxy({}, { get: (_, key) => key });
@@ -104,6 +106,6 @@ test('caregiver directory renders created date separately from hire date', async
   });
   const tree = await mod.exports.default({ searchParams: Promise.resolve({}) });
   assert.match(text(tree), /Created Date/);
-  assert.match(text(tree), /Nov 19, 2026/);
+  assert.match(text(tree), /Nov 20, 2026/);
   assert.match(text(tree), /Since 2020-01/);
 });

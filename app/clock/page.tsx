@@ -1,4 +1,5 @@
 'use client';
+import { agencyDateKey, agencyGreeting, formatScheduleDate } from '@/lib/datetime';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth-context';
@@ -103,6 +104,7 @@ export default function ClockPage() {
 
   const [activeTab, setActiveTab] = useState<TabId>('schedule');
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const [schedulesError, setSchedulesError] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [profile, setProfile] = useState<ProfileItem | null>(null);
@@ -138,20 +140,24 @@ export default function ClockPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setSchedulesError('');
     try {
-      const [sRes, hRes] = await Promise.all([
+      const [scheduleResult, historyResult] = await Promise.allSettled([
         apiFetch('/api/schedules/today'),
         apiFetch('/api/visits/history?days=1&limit=10'),
       ]);
-
-      if (sRes.ok) {
-        const rows: ScheduleItem[] = await sRes.json();
-        setSchedules(rows);
+      if (scheduleResult.status === 'rejected' || !scheduleResult.value.ok) {
+        throw new Error('Unable to load schedules. Please try again.');
       }
-      if (hRes.ok) {
-        const rows: HistoryItem[] = await hRes.json();
+      const rows: ScheduleItem[] = await scheduleResult.value.json();
+      setSchedules(rows);
+      if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
+        const rows: HistoryItem[] = await historyResult.value.json();
         setHistory(rows);
       }
+    } catch {
+      setSchedulesError('Unable to load schedules. Please try again.');
+      setSchedules([]);
     } finally {
       setLoading(false);
     }
@@ -209,6 +215,7 @@ export default function ClockPage() {
   useEffect(() => {
     setSelectedScheduleId(null);
     setSchedules([]);
+    setSchedulesError('');
     setHistory([]);
     setTasks([]);
     setProfile(null);
@@ -219,6 +226,24 @@ export default function ClockPage() {
   useEffect(() => {
     if (!user) return;
     void loadData();
+  }, [loadData, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let currentDay = agencyDateKey();
+    const refreshOnDayChange = () => {
+      const nextDay = agencyDateKey();
+      if (nextDay !== currentDay) {
+        currentDay = nextDay;
+        void loadData();
+      }
+    };
+    const timer = window.setInterval(refreshOnDayChange, 30000);
+    window.addEventListener('focus', refreshOnDayChange);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshOnDayChange);
+    };
   }, [loadData, user]);
 
   useEffect(() => {
@@ -390,8 +415,8 @@ export default function ClockPage() {
         {activeTab === 'schedule' && (
           <>
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>Good evening, {user.display_name ?? user.username}</div>
-              <div style={{ fontSize: 14, color: '#65728b' }}>Here are your available schedules for today.</div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{agencyGreeting()}, {user.display_name ?? user.username}</div>
+              <div style={{ fontSize: 14, color: '#65728b' }}>Today · {formatScheduleDate(`${agencyDateKey()}T12:00:00`)} · Eastern time (ET)</div>
             </div>
 
             <div style={{
@@ -405,6 +430,8 @@ export default function ClockPage() {
 
             {loading ? (
               <Panel>Loading schedules...</Panel>
+            ) : schedulesError ? (
+              <Panel><div role="alert">{schedulesError}</div><button type="button" onClick={() => void loadData()} className="btn secondary" style={{ marginTop: 10 }}>Retry</button></Panel>
             ) : schedules.length === 0 ? (
               <Panel>No schedules available for today.</Panel>
             ) : (

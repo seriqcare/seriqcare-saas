@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import AgencyScope, get_agency_scope
-from backend.services.timezone import SQLSERVER_EASTERN_NOW_EXPR
+from backend.services.timezone import SQLSERVER_EASTERN_NOW_EXPR, now_eastern
 from db.database import get_db
 
 log = logging.getLogger("seriqcare.mobile_coordinator")
@@ -459,7 +459,7 @@ def coordinator_dashboard(
     Return aggregate stats for the coordinator's agency dashboard.
     super_admin sees platform-wide totals.
     """
-    today            = date.today()
+    today            = now_eastern().date()
     agy_filter       = scope.sql_filter()
     agy_filter_visit = scope.sql_filter("v")
     params: dict     = scope.bind({"today": today})

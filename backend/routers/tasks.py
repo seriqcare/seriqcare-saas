@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from backend.auth.dependencies import get_current_user
 from db.database import get_db
 from db.models import User
-from backend.services.timezone import now_eastern_naive
+from backend.services.timezone import now_eastern_naive, now_eastern
 
 log = logging.getLogger("seriqcare.tasks")
 router = APIRouter()
@@ -106,7 +106,7 @@ def get_tasks(
     including today's completion state.
     """
     schedule = _get_schedule_with_access_check(schedule_id, current_user, db)
-    today    = date.today()
+    today    = now_eastern().date()
 
     rows = db.execute(
         text("""
@@ -167,7 +167,7 @@ def complete_tasks(
     The authenticated user's id is recorded — never taken from the request body.
     """
     schedule = _get_schedule_with_access_check(req.schedule_id, current_user, db)
-    today    = date.today()
+    today    = now_eastern().date()
     now      = now_eastern_naive()
     completed_count = 0
 

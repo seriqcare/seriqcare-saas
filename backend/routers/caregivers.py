@@ -18,7 +18,7 @@ from db.database import get_db
 from backend.auth.dependencies import get_agency_scope, AgencyScope
 from backend.payroll_settings import ensure_default_pay_group, sync_timesheet_payroll_for_employee
 from backend.services import sandata as _sandata_svc
-from backend.services.timezone import now_eastern_naive
+from backend.services.timezone import now_eastern_naive, now_eastern, utc_iso
 
 _log = logging.getLogger("seriqcare.caregivers")
 from backend.schemas import (
@@ -34,7 +34,7 @@ router = APIRouter()
 
 
 def _current_week_bounds() -> tuple[date, date]:
-    today = date.today()
+    today = now_eastern().date()
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6)
     return monday, sunday
@@ -213,7 +213,7 @@ def get_caregivers(
                 role=str(r.role),
                 status=str(r.status),
                 hire_date=r.hire_date,
-                created_at=getattr(r, 'created_at', None),
+                created_at=utc_iso(getattr(r, 'created_at', None)),
                 clients_assigned=int(r.clients_assigned or 0),
                 visits_this_week=int(r.visits_this_week or 0),
                 hours_this_week=round(float(r.hours_this_week or 0), 2),
@@ -290,11 +290,11 @@ def create_caregiver(
                 text("""
                     INSERT INTO care.employees
                         (agency_id, employee_code, first_name, last_name, phone,
-                         hire_date, is_active, sandata_employee_id, npi)
+                         hire_date, is_active, sandata_employee_id, npi, created_at)
                     OUTPUT INSERTED.id
                     VALUES
                         (:agency_id, :employee_code, :first_name, :last_name, :phone,
-                         :hire_date, :is_active, :sandata_employee_id, :npi)
+                         :hire_date, :is_active, :sandata_employee_id, :npi, SYSUTCDATETIME())
                 """),
                 {
                     "agency_id":           agency_id,
@@ -313,11 +313,11 @@ def create_caregiver(
                 text("""
                     INSERT INTO care.employees
                         (employee_code, first_name, last_name, phone,
-                         hire_date, is_active, sandata_employee_id, npi)
+                         hire_date, is_active, sandata_employee_id, npi, created_at)
                     OUTPUT INSERTED.id
                     VALUES
                         (:employee_code, :first_name, :last_name, :phone,
-                         :hire_date, :is_active, :sandata_employee_id, :npi)
+                         :hire_date, :is_active, :sandata_employee_id, :npi, SYSUTCDATETIME())
                 """),
                 {
                     "employee_code":       body.employee_code.strip(),

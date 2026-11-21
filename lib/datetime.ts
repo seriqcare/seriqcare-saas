@@ -51,6 +51,13 @@ export function agencyDateKey(value = new Date()) {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+export function agencyGreeting(value = new Date()) {
+  const hour = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone: AGENCY_TIME_ZONE, hour: '2-digit', hourCycle: 'h23',
+  }).format(value));
+  return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+}
+
 export function scheduleInputParts(value: string) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: scheduleZone(value),
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',

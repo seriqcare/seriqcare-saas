@@ -3,11 +3,10 @@ import styles from './visits.module.css';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { getVisits } from '@/lib/queries/timesheets';
 import { LiveVisitRefresh } from '@/components/live-visit-refresh';
-import { VisitSubmitBtn } from '@/components/visit-submit-btn';
 import { QueryTabs } from '@/components/query-tabs';
 import { VisitPeriodSelect } from '@/components/visit-period-select';
 import { EscCodePanel } from '@/components/esc-code-panel';
-import { VisitRowActions } from '@/components/visit-detail-modal';
+import { VisitRecordActions } from '@/components/visit-record-actions';
 import { AggregatorOffBanner } from '@/components/aggregator-off-banner';
 import { AggregatorTabs } from '@/components/aggregator-tabs';
 import { AggregatorSubmissionHistory } from '@/components/aggregator-submission-history';
@@ -54,7 +53,7 @@ function initials(name: string) {
 
 function fmtDate(iso: string) {
   return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
   });
 }
 
@@ -246,104 +245,70 @@ export default async function VisitsPage({
 
             <div className={`table-scroll ${styles.visitTableBody}`}>
               <table>
-                <colgroup>{[7, 12, 11, 9, 8, 9, 6, 6, 5, 12, 15].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
+                <colgroup>{[15, 19, 19, 16, 7, 15, 9].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
                 <thead>
                   <tr>
-                    <th>Visit ID</th>
-                    <th>Caregiver</th>
+                    <th>Visit</th>
                     <th>Client</th>
-                    <th>Date</th>
-                    <th>Clock In</th>
-                    <th>Clock Out</th>
-                    <th>In GPS</th>
-                    <th>Out GPS</th>
+                    <th>Caregiver</th>
+                    <th>Time</th>
                     <th>Hours</th>
-                    <th>{aggregator === 'sandata' ? 'Sandata Status' : aggregator === 'hhax' ? 'HHAX Status' : 'EVV Status'}</th>
+                    <th>Status</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.length === 0 ? (
                     <tr>
-                      <td colSpan={11} style={{ textAlign: 'center', color: '#999', padding: '40px 0' }}>
+                      <td colSpan={7} style={{ textAlign: 'center', color: '#999', padding: '40px 0' }}>
                         <div style={{ fontWeight: 600, marginBottom: 4 }}>No visit records this week</div>
                         <div style={{ fontSize: 11 }}>Check API connection or clock in to a visit</div>
                       </td>
                     </tr>
                   ) : (
                     items.map((v) => {
-                      const displayStatus = aggregator === 'sandata'
-                        ? (v.sandata_status ?? '—')
-                        : aggregator === 'hhax'
-                          ? (v.hhax_status ?? '—')
-                          : v.evv_status;
-                      const dotColor = tabCfg.colorMap[displayStatus] ?? '#8a9aaa';
-                      const statusCls = tabCfg.clsMap[displayStatus] ?? '';
+                      const submissionStatus = (aggregator === 'hhax' ? v.hhax_status : v.sandata_status) || 'Not submitted';
+                      const submissionLabel = aggregator === 'hhax' ? 'HHAeXchange' : 'Sandata';
+                      const gpsWarning = v.evv_status !== 'Exempt' && (
+                        (!!v.clock_in && (v.clock_in_lat == null || v.clock_in_lon == null)) ||
+                        (!!v.clock_out && (v.clock_out_lat == null || v.clock_out_lon == null)));
                       return (
                         <tr key={v.id}>
                           <td>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: '#2567a4' }}>#{String(v.id).padStart(5, '0')}</div>
+                            <div className={styles.visitId}>#{String(v.id).padStart(5, '0')}</div>
+                            <div className={styles.visitDate}>{fmtDate(v.service_date)}</div>
                           </td>
                           <td>
                             <div className="person-cell">
-                              <div className="person-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#35693c', background: 'linear-gradient(135deg,#d7edd7,#9ecb9e)' }}>
-                                {initials(v.employee_name)}
-                              </div>
-                              <div>
-                                <div className="person-name" title={v.employee_name}>{v.employee_name}</div>
-                                <div className="person-meta">{v.employee_code}</div>
-                              </div>
+                              <div className="person-avatar" aria-hidden="true">{initials(v.client_name)}</div>
+                              <div className={styles.visitName} title={v.client_name}>{v.client_name}</div>
                             </div>
                           </td>
                           <td>
                             <div className="person-cell">
-                              <div className="person-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#2567a4' }}>
-                                {initials(v.client_name)}
+                              <div className={`person-avatar ${styles.caregiverAvatar}`} aria-hidden="true">{initials(v.employee_name)}</div>
+                              <div className={styles.visitName} title={v.employee_name}>{v.employee_name}</div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className={styles.visitTimes}>
+                              <div><span>In</span><strong>{v.clock_in || 'Missing'}</strong></div>
+                              <div><span>Out</span><strong className={!v.clock_out && v.in_progress ? styles.activeTime : undefined}>{v.clock_out || (v.in_progress ? 'In progress' : 'Missing')}</strong></div>
+                            </div>
+                          </td>
+                          <td className={styles.visitHours}>{v.total_hours.toFixed(1)}</td>
+                          <td>
+                            <div className={styles.visitStatuses}>
+                              <div className={styles.evvStatusLine}>
+                                <span className={`status ${EVV_CLS[v.evv_status] || ''}`}>{v.evv_status}</span>
+                                {gpsWarning && <span className={styles.gpsWarning} role="img" aria-label="GPS missing: open View for location details" title="GPS missing. Open View for location details.">
+                                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M8 1.5l6.5 12h-13L8 1.5zM8 5v4M8 11v1" /></svg>
+                                </span>}
                               </div>
-                              <div className="person-name" title={v.client_name}>{v.client_name}</div>
+                              <span className={styles.submissionStatus} title={`${submissionLabel}: ${submissionStatus}`}>{submissionLabel}: {submissionStatus}</span>
                             </div>
                           </td>
-                          <td style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtDate(v.service_date)}</td>
-                          <td>
-                            {v.clock_in
-                              ? <span style={{ fontSize: 12, fontWeight: 600, color: '#35693c' }}>{v.clock_in}</span>
-                              : <span style={{ fontSize: 12, color: '#d56b6b', fontWeight: 600 }}>Missing</span>
-                            }
-                          </td>
-                          <td>
-                            {v.clock_out
-                              ? <span style={{ fontSize: 12, fontWeight: 600, color: '#35693c' }}>{v.clock_out}</span>
-                              : v.in_progress ? <span className="status in-progress">In Progress</span> : <span style={{ fontSize: 12, color: '#d56b6b', fontWeight: 600 }}>Missing</span>
-                            }
-                          </td>
-                          <td style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-                            {v.clock_in_lat != null
-                              ? <><div>{v.clock_in_lat.toFixed(4)}</div><div>{v.clock_in_lon?.toFixed(4)}</div></>
-                              : <span style={{ color: '#d56b6b', fontWeight: 600 }}>Missing</span>
-                            }
-                          </td>
-                          <td style={{ fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-                            {v.clock_out_lat != null
-                              ? <><div>{v.clock_out_lat.toFixed(4)}</div><div>{v.clock_out_lon?.toFixed(4)}</div></>
-                              : v.in_progress ? <span style={{ color: 'var(--muted)' }}>In Progress</span> : <span style={{ color: '#d56b6b', fontWeight: 600 }}>Missing</span>
-                            }
-                          </td>
-                          <td>
-                            <div style={{ fontSize: 16, fontWeight: 700 }}>{v.total_hours.toFixed(1)}</div>
-                            <div style={{ fontSize: 10, color: 'var(--muted)' }}>hrs</div>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0, display: 'inline-block' }} />
-                              <span className={`status ${statusCls}`}>{displayStatus}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <div className={styles.visitActions}>
-                              <VisitRowActions visit={v} />
-                              {aggregator !== 'hhax' && <VisitSubmitBtn visitId={v.id} evvStatus={v.evv_status} submissionStatus={v.sandata_status} submissionCount={v.sandata_submission_count} />}
-                            </div>
-                          </td>
+                          <td><VisitRecordActions visit={v} aggregator={aggregator} /></td>
                         </tr>
                       );
                     })

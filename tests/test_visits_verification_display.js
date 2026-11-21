@@ -9,13 +9,13 @@ function text(node) {
   if (node && typeof node === 'object') return text(node.props?.children);
   return node == null || typeof node === 'boolean' ? '' : String(node);
 }
-async function page(summary, inspect = false) {
+async function page(summary, inspect = false, items = []) {
   const mod = { exports: {} }, calls = [];
   const js = ts.transpileModule(fs.readFileSync('app/visits/page.tsx', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2017 } }).outputText;
   vm.runInNewContext(js, { module: mod, exports: mod.exports, URLSearchParams,
     require(name) {
       if (name === 'react/jsx-runtime') return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
-      if (name.endsWith('queries/timesheets')) return { getVisits: async (...args) => { calls.push(args); return ({ total: 12, items: [], stats: { total_hours: 2, pending_approval: 1, approved: 2 }, summary }); } };
+      if (name.endsWith('queries/timesheets')) return { getVisits: async (...args) => { calls.push(args); return ({ total: 12, items, stats: { total_hours: 2, pending_approval: 1, approved: 2 }, summary }); } };
       return new Proxy({}, { get: (_, key) => key });
     },
   });
@@ -65,4 +65,27 @@ test('Visits uses four records, moves source controls into the toolbar and prese
   for (const link of pageLinks) {
     assert.equal(new URLSearchParams(link.props.href.split('?')[1]).get('historyPage'), '3');
   }
+});
+
+
+test('visit records have seven columns, visible date, combined statuses, and GPS details delegated to View', async () => {
+  const visit = { id: 1035, employee_name: 'Noah Caregiver', client_name: 'Bulb Hannah',
+    service_date: '2026-11-20', clock_in: '6:04 PM', clock_out: null, in_progress: true, total_hours: 0,
+    clock_in_lat: 40.021, clock_in_lon: -76.7641, clock_out_lat: null, clock_out_lon: null,
+    evv_status: 'Pending', sandata_status: 'Draft' };
+  const { tree } = await page({ due: 0 }, true, [visit]);
+  const all = nodes(tree);
+  assert.deepEqual(all.filter(n => n.type === 'th').map(text), ['Visit', 'Client', 'Caregiver', 'Time', 'Hours', 'Status', 'Actions']);
+  const row = all.find(n => n.type === 'tr' && n.props.children?.[0]?.type === 'td');
+  assert.equal(row.props.children.length, 7);
+  assert.match(text(row.props.children[0]), /#01035.*Nov 20, 2026/);
+  assert.match(text(row), /Bulb Hannah/);
+  assert.match(text(row), /Noah Caregiver/);
+  assert.match(text(row), /In progress/);
+  assert.match(text(row), /Sandata: Draft/);
+  assert.doesNotMatch(text(row), /40.021|-76.7641/);
+  assert.ok(all.some(n => n.type === 'VisitRecordActions' && n.props.visit.id === 1035));
+  assert.ok(!all.some(n => n.props?.['aria-label']?.startsWith('GPS missing')));
+  const missing = await page({ due: 1 }, true, [{ ...visit, clock_out: '7:00 PM', in_progress: false }]);
+  assert.ok(nodes(missing.tree).some(n => n.props?.['aria-label']?.startsWith('GPS missing')));
 });

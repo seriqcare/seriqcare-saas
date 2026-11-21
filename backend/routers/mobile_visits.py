@@ -22,7 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user
-from backend.services.timezone import EASTERN, SQLSERVER_EASTERN_NOW_EXPR, UTC
+from backend.services.timezone import EASTERN, SQLSERVER_EASTERN_NOW_EXPR, UTC, now_eastern
 from backend.services.evv_validation import validate_and_gate
 from db.audit import write_audit
 from db.database import get_db
@@ -447,7 +447,7 @@ def get_visit_history(
     if current_user.employee_id is None or current_user.agency_id is None:
         raise HTTPException(status_code=403, detail="User is not linked to an employee and agency")
 
-    since = date.today() - timedelta(days=days)
+    since = now_eastern().date() - timedelta(days=days)
 
     rows = db.execute(
         text("""

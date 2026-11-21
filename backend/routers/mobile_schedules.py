@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import get_current_user
-from backend.services.timezone import EASTERN
+from backend.services.timezone import EASTERN, now_eastern
 from db.database import get_db
 from db.models import User
 
@@ -99,7 +99,7 @@ def _build_schedule_items(rows, today: date) -> List[ScheduleItem]:
     for r in rows:
         start_local = _utc_to_local(r.scheduled_start)
         end_local   = _utc_to_local(r.scheduled_end)
-        date_label  = "Today" if start_local.date() == today else start_local.strftime("%b %-d")
+        date_label  = "Today" if start_local.date() == today else f"{start_local.strftime('%b')} {start_local.day}"
         result.append(
             ScheduleItem(
                 id           = str(r.id),
@@ -129,7 +129,7 @@ def get_today_schedules(
     """Return all non-cancelled schedules for today assigned to the authenticated caregiver."""
     if current_user.employee_id is None or current_user.agency_id is None:
         return []
-    today = date.today()
+    today = now_eastern().date()
     rows  = _fetch_schedules(current_user.employee_id, current_user.agency_id, today, today, db)
     return _build_schedule_items(rows, today)
 
@@ -146,7 +146,8 @@ def get_week_schedules(
     """
     if current_user.employee_id is None or current_user.agency_id is None:
         return []
-    from_date = start_date or date.today()
+    today = now_eastern().date()
+    from_date = start_date or today
     to_date   = from_date + timedelta(days=6)
     rows = _fetch_schedules(current_user.employee_id, current_user.agency_id, from_date, to_date, db)
-    return _build_schedule_items(rows, date.today())
+    return _build_schedule_items(rows, today)

@@ -50,6 +50,7 @@ interface UserRow {
   role: string;
   agency_id: number | null;
   agency_name: string | null;
+  agency_code: string | null;
   is_active: boolean;
   last_login_at: string | null;
   created_at: string;
@@ -379,6 +380,7 @@ export default function SuperAdminPage() {
                 <th>Email</th>
                 <th>Role</th>
                 <th>Agency</th>
+                <th>Agency Code</th>
                 <th>Status</th>
                 <th>Last Login</th>
                 <th>Created</th>
@@ -392,13 +394,14 @@ export default function SuperAdminPage() {
                   <td>{u.email || '—'}</td>
                   <td><span className="sa-role-pill">{u.role.replace('_', ' ')}</span></td>
                   <td>{u.agency_name || '—'}</td>
+                  <td className="sa-mono sa-nowrap">{u.agency_code || '—'}</td>
                   <td>{statusBadge(u.is_active)}</td>
                   <td className="sa-nowrap">{fmtDateTime(u.last_login_at)}</td>
                   <td className="sa-nowrap">{fmtDate(u.created_at)}</td>
                 </tr>
               ))}
               {users.length === 0 && (
-                <tr><td colSpan={8} className="sa-empty">No users found.</td></tr>
+                <tr><td colSpan={9} className="sa-empty">No users found.</td></tr>
               )}
             </tbody>
           </table>

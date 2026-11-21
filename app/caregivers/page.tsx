@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { formatAuditDate as formatCreatedDate } from '@/lib/datetime';
 import { ProtectedLayout } from '@/components/protected-layout';
 import { getCaregivers, type CaregiverSummary } from '@/lib/queries/caregivers';
 import { QuerySearchInput } from '@/components/query-search-input';
@@ -146,7 +147,7 @@ export default async function CaregiversPage({
                             </div>
                           </Link>
                         </td>
-                        <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{c.created_at ? new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                        <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{formatCreatedDate(c.created_at ?? null)}</td>
                         <td>
                           <span style={{ fontSize: 11, fontWeight: 700, color: roleColor, background: roleColor + '18', padding: '3px 8px', borderRadius: 4, border: `1px solid ${roleColor}30` }}>
                             {ROLE_ABBR[c.role] ?? c.role.slice(0, 3).toUpperCase()}

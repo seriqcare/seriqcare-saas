@@ -374,7 +374,7 @@ def list_users(
     rows = db.execute(text(f"""
         SELECT
             u.id, u.username, u.display_name, u.email, u.role,
-            u.agency_id, a.name AS agency_name,
+            u.agency_id, a.name AS agency_name, a.agency_code,
             u.is_active, u.last_login_at, u.created_at
         FROM  care.users u
         LEFT  JOIN care.agencies a ON a.id = u.agency_id

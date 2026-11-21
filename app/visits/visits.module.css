@@ -38,7 +38,7 @@
   scrollbar-gutter: stable;
 }
 .records > *, .sidebar > * { flex-shrink: 0; }
-.records { --visit-row-height: clamp(40px, 5.3vh, 50px); --history-row-height: clamp(34px, 4.4vh, 40px); }
+.records { --visit-row-height: 56px; --history-row-height: clamp(34px, 4.4vh, 40px); }
 .visitRecordsCard, .historyCard { display: flex; flex-direction: column; }
 .visitRecordsHeader { height: 76px; flex-shrink: 0; }
 .visitRecordsHeader :global(.card-subtitle) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -46,10 +46,10 @@
 .historyHeader > div { min-width: 0; }
 .historyHeader :global(.card-title), .historyHeader :global(.card-subtitle) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .historyHeader > a { white-space: nowrap; flex-shrink: 0; }
-.visitTableBody { height: calc(32px + 4 * var(--visit-row-height) + 20px); flex-shrink: 0; }
+.visitTableBody { height: calc(32px + 4 * var(--visit-row-height)); flex-shrink: 0; }
 .historyTableBody { height: calc(32px + 4 * var(--history-row-height)); flex-shrink: 0; overflow: auto; }
 .visitTableBody table, .historyTableBody table { table-layout: fixed; }
-.visitTableBody table { min-width: 1000px; }
+.visitTableBody table { min-width: 0; }
 .visitTableBody { overflow-x: auto; overflow-y: hidden; }
 .historyTableBody td:not(:last-child) { white-space: nowrap; }
 .visitTableBody thead tr, .historyTableBody thead tr { height: 32px; }
@@ -60,9 +60,32 @@
 .visitTableBody td, .historyTableBody td { overflow: hidden; text-overflow: ellipsis; }
 .visitTableBody th, .historyTableBody th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .visitTableBody :global(.person-cell) > :last-child { min-width: 0; }
-.visitTableBody :global(.person-name), .visitTableBody :global(.person-meta) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.visitName { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; overflow-wrap: anywhere; font-weight: 600; line-height: 15px; }
+.visitTableBody :global(.person-avatar) { display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: var(--primary); }
+.visitTableBody .caregiverAvatar { background: #d7edd7; color: var(--success-text); }
+.visitId { color: var(--primary); font-size: 11px; font-weight: 700; }
+.visitDate { margin-top: 2px; font-size: 10px; line-height: 13px; color: var(--muted); }
+.visitTimes, .visitStatuses { display: grid; gap: 3px; }
+.visitTimes > div { display: flex; align-items: baseline; gap: 6px; font-size: 11px; white-space: nowrap; }
+.visitTimes > div > span { width: 22px; flex-shrink: 0; color: var(--muted); font-size: 10px; }
+.activeTime { color: #6d28d9; }
+.visitTableBody .visitHours { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.evvStatusLine { display: flex; align-items: center; gap: 5px; }
+.visitStatuses :global(.status) { padding: 2px 6px; line-height: 12px; }
+.submissionStatus { color: var(--muted); font-size: 10px; line-height: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpsWarning { display: inline-flex; color: var(--warning-text); cursor: help; }
 .visitActions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; white-space: nowrap; }
 .visitActions :global(.action-link) { margin-right: 0; }
+.viewButton, .moreButton { height: 28px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--primary); cursor: pointer; font-size: 11px; font-weight: 600; }
+.viewButton { padding: 0 7px; }
+.moreButton { width: 26px; padding: 0; font-size: 19px; line-height: 1; }
+.viewButton:hover, .moreButton:hover { background: var(--primary-soft); }
+.viewButton:focus-visible, .moreButton:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.actionMenu { position: fixed; inset: auto; margin: 0; padding: 6px; width: 180px; max-height: calc(100dvh - 16px); overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); box-shadow: 0 8px 24px #02142526; }
+.actionMenu:popover-open { display: grid; gap: 4px; }
+.actionMenu > button, .actionMenu > a { display: block; width: 100%; padding: 8px 10px !important; text-align: left; border: 0; border-radius: 4px; background: transparent; font: inherit; font-size: 12px !important; text-decoration: none !important; cursor: pointer; }
+.actionMenu > button:not(:disabled):hover, .actionMenu > a:hover { background: var(--primary-soft); }
+.actionMenu > button:disabled { color: var(--muted); cursor: not-allowed; opacity: .6; }
 .tableFooter { height: 44px; flex-shrink: 0; margin-top: auto; border-top: 1px solid var(--line-soft); }
 .records .tableFooter { flex-wrap: nowrap; }
 .tableFooter > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -96,7 +119,8 @@
   .visitTableBody { height: calc(32px + 4 * var(--visit-row-height)); }
   .records :global(th), .records :global(td) { padding-left: 6px; padding-right: 6px; }
   .visitTableBody th { font-size: 10px; letter-spacing: 0; }
-  .visitActions { gap: 5px; }
+  .visitActions { gap: 4px; }
+  .visitTableBody :global(.person-avatar) { display: none; }
   .visitActions :global(.action-link) { font-size: 11px !important; }
 }
 @media (max-width: 1100px) {
@@ -109,6 +133,7 @@
   .topbar { margin-bottom: 8px; }
   .topbar :global(.page-subtitle) { display: none; }
   .records { --visit-row-height: 36px; --history-row-height: 30px; }
+  .records .visitTableBody td { padding-top: 3px; padding-bottom: 3px; }
   .visitRecordsHeader { height: 64px; }
   .visitRecordsHeader :global(.card-subtitle), .historyHeader :global(.card-subtitle) { display: none; }
   .historyHeader { height: 40px; }
@@ -117,6 +142,11 @@
   .visitTableBody thead tr, .historyTableBody thead tr { height: 28px; }
   .records :global(th) { padding-top: 6px; padding-bottom: 6px; }
   .visitTableBody td, .visitTableBody :global(.person-name), .visitTableBody :global(.person-meta) { line-height: 12px; }
+  .visitName { line-height: 14px; }
+  .visitDate { margin-top: 0; line-height: 12px; }
+  .visitTimes, .visitStatuses { gap: 2px; }
+  .visitTimes > div, .submissionStatus { line-height: 12px; }
+  .visitStatuses :global(.status) { padding: 1px 5px; font-size: 9px; line-height: 10px; }
   .historyTableBody :global(.submission-response) { font-size: 11px; line-height: 12px; }
   .records .tableFooter { height: 36px; padding: 4px 12px !important; }
   .records > :global(.card):not(.visitRecordsCard):not(.historyCard) { padding: 8px 12px; }
@@ -133,6 +163,8 @@
   .topbar { align-items: flex-start; flex-wrap: wrap; }
   .layout { display: flex; flex-direction: column; }
   .records, .sidebar { overflow: visible; }
-  .visitTableBody table { min-width: 760px; }
-  .visitTableBody { height: calc(32px + 4 * var(--visit-row-height) + 20px); }
+  .visitTableBody table { min-width: 0; }
+  .visitTableBody { height: calc(32px + 4 * var(--visit-row-height)); }
+  .visitActions { flex-direction: column; gap: 2px; }
+  .visitTimes > div { flex-wrap: wrap; gap: 1px; }
 }

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from backend.services.timezone import now_eastern
 from backend.auth.dependencies import get_current_user
 from db.database import get_db
 from db.models import User
@@ -47,7 +48,7 @@ def get_my_profile(
                   AND  CAST(scheduled_start AS DATE) = :today
                   AND  status <> 'Cancelled'
             """),
-            {"emp_id": current_user.employee_id, "agency_id": current_user.agency_id, "today": date.today()},
+            {"emp_id": current_user.employee_id, "agency_id": current_user.agency_id, "today": now_eastern().date()},
         ).fetchone()
         if row:
             schedule_count = row.cnt

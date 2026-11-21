@@ -18,7 +18,7 @@ function fmtDate(iso: string) {
 }
 
 /* ── View Modal ─────────────────────────────────────── */
-function ViewModal({ visit, onClose }: { visit: VisitEntry; onClose: () => void }) {
+export function ViewModal({ visit, onClose }: { visit: VisitEntry; onClose: () => void }) {
   const evvColor = EVV_COLOR[visit.evv_status] ?? '#2567a4';
   return (
     <Overlay onClose={onClose}>
@@ -72,7 +72,7 @@ function ViewModal({ visit, onClose }: { visit: VisitEntry; onClose: () => void 
 }
 
 /* ── Fix / Edit Modal ───────────────────────────────── */
-function FixModal({ visit, onClose, editMode = false }: { visit: VisitEntry; onClose: () => void; editMode?: boolean }) {
+export function FixModal({ visit, onClose, editMode = false }: { visit: VisitEntry; onClose: () => void; editMode?: boolean }) {
   const { apiFetch } = useAuth();
   const [clockIn,  setClockIn]  = useState(visit.clock_in  ?? '');
   const [clockOut, setClockOut] = useState(visit.clock_out ?? '');

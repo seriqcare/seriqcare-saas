@@ -16,6 +16,7 @@ function harness(file, role) {
     module, exports: module.exports,
     require(name) {
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
+      if (name === '@/lib/datetime') { const dates = { exports: {} }; vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/datetime.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { module: dates, exports: dates.exports }); return dates.exports; }
       if (name === 'react') return {
         useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], value => { state[i] = typeof value === 'function' ? value(state[i]) : value; }]; },
         useEffect() {}, useRef: initial => ({ current: initial }), useCallback: fn => fn, useMemo: fn => fn(),
